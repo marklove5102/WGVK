@@ -186,6 +186,7 @@ static inline uint32_t findMemoryType(WGPUAdapter adapter, uint32_t typeFilter, 
 
 
 WGPUSurface wgpuInstanceCreateSurface(WGPUInstance instance, const WGPUSurfaceDescriptor* descriptor){
+    ENTRY();
     wgvk_assert(descriptor->nextInChain, "SurfaceDescriptor must have a nextInChain");
     WGPUSurface ret = RL_CALLOC(1, sizeof(WGPUSurfaceImpl));
     ret->refCount = 1;
@@ -301,10 +302,12 @@ WGPUSurface wgpuInstanceCreateSurface(WGPUInstance instance, const WGPUSurfaceDe
         }
     }
     return ret;
+    EXIT();
 }
 
 
 WGPUStatus wgpuDeviceGetAdapterInfo(WGPUDevice device, WGPUAdapterInfo* adapterInfo) WGPU_FUNCTION_ATTRIBUTE {
+    ENTRY();
     // 1. Validate input parameters
     if (device == NULL || adapterInfo == NULL || device->adapter == NULL || device->adapter->physicalDevice == VK_NULL_HANDLE) {
         // Return an error if any required input or internal pointer is null
@@ -336,11 +339,13 @@ WGPUStatus wgpuDeviceGetAdapterInfo(WGPUDevice device, WGPUAdapterInfo* adapterI
 
     // 5. Return success
     return WGPUStatus_Success;
+    EXIT();
 }
 #ifndef MIN
     #define MIN(a, b) (((a) < (b)) ? (a) : (b))
 #endif
 WGPUStatus wgpuAdapterGetLimits(WGPUAdapter adapter, WGPULimits* limits) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     VkPhysicalDeviceSubgroupProperties subgroupProperties = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES
     };
@@ -391,6 +396,7 @@ WGPUStatus wgpuAdapterGetLimits(WGPUAdapter adapter, WGPULimits* limits) WGPU_FU
     limits->maxStorageTexturesInFragmentStage = deviceProperties2.properties.limits.maxPerStageDescriptorStorageImages;
 
     return WGPUStatus_Success;
+    EXIT();
 }
 
 static RenderPassLayout GetRenderPassLayout2(const RenderPassCommandBegin* rpdesc){
@@ -606,6 +612,7 @@ LayoutedRenderPass LoadRenderPassFromLayout(WGPUDevice device, RenderPassLayout 
 }
 
 void wgpuTraceLog(int logType, const char *text, ...){
+    ENTRY();
     // Message has level below current threshold, don't emit
     //if(logType < tracelogLevel)return;
 
@@ -650,6 +657,7 @@ void wgpuTraceLog(int logType, const char *text, ...){
         exit(EXIT_FAILURE); 
     }
 
+    EXIT();
 }
 
 static VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger) {
@@ -708,6 +716,7 @@ static inline int endswith_(const char* str, const char* suffix) {
 }
 
 WGPUInstance wgpuCreateInstance(const WGPUInstanceDescriptor* descriptor) {
+    ENTRY();
     WGPUInstance ret = (WGPUInstance)RL_CALLOC(1, sizeof(WGPUInstanceImpl));
     if (!ret) {
         fprintf(stderr, "calloc failed to allocate memory for WGPUInstance\n");
@@ -933,8 +942,10 @@ WGPUInstance wgpuCreateInstance(const WGPUInstanceDescriptor* descriptor) {
 
     // 8. Return the created instance handle
     return ret;
+    EXIT();
 }
 WGPUWaitStatus wgpuInstanceWaitAny(WGPUInstance instance, size_t futureCount, WGPUFutureWaitInfo* futureWaitInfos, uint64_t timeoutNS){
+    ENTRY();
     for(uint32_t i = 0;i < futureCount;i++){
         if(!futureWaitInfos[i].completed){
             WGPUFutureImpl* futureObject = FutureIDMap_get(&instance->g_futureIDMap, futureWaitInfos[i].future.id);
@@ -946,6 +957,7 @@ WGPUWaitStatus wgpuInstanceWaitAny(WGPUInstance instance, size_t futureCount, WG
         }
     }
     return WGPUWaitStatus_Success;
+    EXIT();
 }
 typedef struct userdataforcreateadapter{
     WGPUInstance instance;
@@ -984,6 +996,7 @@ static inline VkPhysicalDeviceType tvkpdt(WGPUAdapterType atype){
 //    return (VkPhysicalDeviceType)-1;
 //}
 void wgpuCreateAdapter_sync(void* userdata_v){
+    ENTRY();
     userdataforcreateadapter* userdata = (userdataforcreateadapter*)userdata_v;
     uint32_t physicalDeviceCount;
     vkEnumeratePhysicalDevices(userdata->instance->instance, &physicalDeviceCount, NULL);
@@ -1062,8 +1075,10 @@ void wgpuCreateAdapter_sync(void* userdata_v){
     RL_FREE((void*)pds);
     RL_FREE((void*)props);
     userdata->info.callback(WGPURequestAdapterStatus_Success, adapter, CLITERAL(WGPUStringView){NULL, 0}, userdata->info.userdata1, userdata->info.userdata2);
+    EXIT();
 }
 WGPUFuture wgpuInstanceRequestAdapter(WGPUInstance instance, const WGPURequestAdapterOptions* options, WGPURequestAdapterCallbackInfo callbackInfo){
+    ENTRY();
     userdataforcreateadapter* info = (userdataforcreateadapter*)RL_CALLOC(1, sizeof(userdataforcreateadapter));
     info->instance = instance;
     if(options)
@@ -1078,6 +1093,7 @@ WGPUFuture wgpuInstanceRequestAdapter(WGPUInstance instance, const WGPURequestAd
     uint64_t id = instance->currentFutureId++; //atomic?
     FutureIDMap_put(&instance->g_futureIDMap, id, ret);
     return (WGPUFuture){ id };
+    EXIT();
 }
 
 static int cmp_uint32_(const void *a, const void *b) {
@@ -1127,6 +1143,7 @@ typedef struct userdataforcreatedevice{
 
 
 WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescriptor* descriptor){
+    ENTRY();
     //std::pair<WGPUDevice, WGPUQueue> ret = {0,0};
     
     for(uint32_t i = 0;i < descriptor->requiredFeatureCount;i++){
@@ -1315,23 +1332,23 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
             .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
         };
         retDevice->functions.vkAllocateCommandBuffers(retDevice->device, &cbai, &retDevice->frameCaches[i].finalTransitionBuffer);
+        printf("[DEBUG] ftb of fif %u is %p\n", i, retDevice->frameCaches[i].finalTransitionBuffer);
         retDevice->frameCaches[i].finalTransitionFence = wgpuDeviceCreateFence(retDevice);
     }
     retQueue->presubmitCache = wgpuDeviceCreateCommandEncoder(retDevice, &cedesc);
     VkDeviceSize limit = (((uint64_t)1) << 30);
 
-    VkPhysicalDeviceMemoryProperties memoryProperties zeroinit;
-    vkGetPhysicalDeviceMemoryProperties(adapter->physicalDevice, &memoryProperties);
+    VkPhysicalDeviceMemoryProperties2 memoryProperties = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
+    vkGetPhysicalDeviceMemoryProperties2(adapter->physicalDevice, &memoryProperties);
 
     VkDeviceSize heapsizes[128] = {0};
     
-    for(uint32_t i = 0;i < memoryProperties.memoryHeapCount;i++){
+    for(uint32_t i = 0;i < memoryProperties.memoryProperties.memoryHeapCount;i++){
         heapsizes[i] = limit;
     }
-    vkGetPhysicalDeviceMemoryProperties(adapter->physicalDevice, &memoryProperties);
     uint32_t hostVisibleCoherentIndex = 0;
-    for(hostVisibleCoherentIndex = 0;hostVisibleCoherentIndex < memoryProperties.memoryTypeCount;hostVisibleCoherentIndex++){
-        if(memoryProperties.memoryTypes[hostVisibleCoherentIndex].propertyFlags & (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)){
+    for(hostVisibleCoherentIndex = 0;hostVisibleCoherentIndex < memoryProperties.memoryProperties.memoryTypeCount;hostVisibleCoherentIndex++){
+        if(memoryProperties.memoryProperties.memoryTypes[hostVisibleCoherentIndex].propertyFlags & (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)){
             break;
         }
     }
@@ -1401,9 +1418,11 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
     }
     RL_FREE(deprops);
     return retDevice;
+    EXIT();
 }
 
 static void wgpuAdapterCreateDevice_sync(void* userdata){
+    ENTRY();
     userdataforcreatedevice* data = (userdataforcreatedevice*)userdata;
     WGPUDevice device = wgpuAdapterCreateDevice(data->adapter, &data->deviceDescriptor);
     if(device){
@@ -1424,9 +1443,11 @@ static void wgpuAdapterCreateDevice_sync(void* userdata){
             data->callbackInfo.userdata2
         );
     }
+    EXIT();
 }
 
 WGPUFuture wgpuAdapterRequestDevice(WGPUAdapter adapter, WGPU_NULLABLE WGPUDeviceDescriptor const * options, WGPURequestDeviceCallbackInfo callbackInfo) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     userdataforcreatedevice* userdata = RL_CALLOC(1, sizeof(userdataforcreatedevice));
     userdata->adapter = adapter;
     userdata->callbackInfo = callbackInfo;
@@ -1439,11 +1460,14 @@ WGPUFuture wgpuAdapterRequestDevice(WGPUAdapter adapter, WGPU_NULLABLE WGPUDevic
     uint64_t id = adapter->instance->currentFutureId++;
     FutureIDMap_put(&adapter->instance->g_futureIDMap, id, impl);
     return (WGPUFuture){id};
+    EXIT();
 }
 
 WGPUQueue wgpuDeviceGetQueue(WGPUDevice device){
+    ENTRY();
     wgpuQueueAddRef(device->queue);
     return device->queue;
+    EXIT();
 }
 typedef struct userdataformapbufferasync{
     WGPUBuffer buffer;
@@ -1454,15 +1478,18 @@ typedef struct userdataformapbufferasync{
 }userdataformapbufferasync;
 
 void wgpuBufferMapSync(void* data){
+    ENTRY();
     userdataformapbufferasync* info = (userdataformapbufferasync*)data;
     void* mapdata = NULL;
     wgpuBufferMap(info->buffer, info->mode, info->offset, info->size, &mapdata);
     
     info->info.callback(WGPUMapAsyncStatus_Success, (WGPUStringView){"", 0}, info->info.userdata1, info->info.userdata2);
+    EXIT();
 }
 void wgpuBufferMap(WGPUBuffer buffer, WGPUMapMode mapmode, size_t offset, size_t size, void** data);
 
 WGPUBuffer wgpuDeviceCreateBuffer(WGPUDevice device, const WGPUBufferDescriptor* desc){
+    ENTRY();
     //vmaCreateAllocator(const VmaAllocatorCreateInfo * _Nonnull pCreateInfo, VmaAllocator  _Nullable * _Nonnull pAllocator)
     
     if(desc->usage & WGPUBufferUsage_MapRead){
@@ -1546,9 +1573,11 @@ WGPUBuffer wgpuDeviceCreateBuffer(WGPUDevice device, const WGPUBufferDescriptor*
 
     }
     return wgpuBuffer;
+    EXIT();
 }
 
 void wgpuBufferMap(WGPUBuffer buffer, WGPUMapMode mapmode, size_t offset, size_t size, void** data){
+    ENTRY();
     WGPUDevice device = buffer->device;
     if(size == WGPU_WHOLE_SIZE){
         size = wgpuBufferGetSize(buffer);
@@ -1587,9 +1616,11 @@ void wgpuBufferMap(WGPUBuffer buffer, WGPUMapMode mapmode, size_t offset, size_t
         *data = NULL;
     }
     
+    EXIT();
 }
 
 void wgpuBufferUnmap(WGPUBuffer buffer){
+    ENTRY();
     WGPUDevice device = buffer->device;
     buffer->mappedRange = NULL;
     buffer->mapState = WGPUBufferMapState_Unmapped;
@@ -1612,10 +1643,12 @@ void wgpuBufferUnmap(WGPUBuffer buffer){
         default:
         rg_unreachable();
     }
+    EXIT();
 }
 
 
 WGPUFuture wgpuBufferMapAsync(WGPUBuffer buffer, WGPUMapMode mode, size_t offset, size_t size, WGPUBufferMapCallbackInfo callbackInfo){
+    ENTRY();
     userdataformapbufferasync* info = (userdataformapbufferasync*)RL_CALLOC(1, sizeof(userdataformapbufferasync));
     info->buffer = buffer;
     info->mode = mode;
@@ -1630,9 +1663,11 @@ WGPUFuture wgpuBufferMapAsync(WGPUBuffer buffer, WGPUMapMode mode, size_t offset
     uint64_t id = buffer->device->adapter->instance->currentFutureId++; //atomic?
     FutureIDMap_put(&buffer->device->adapter->instance->g_futureIDMap, id, ret);
     return (WGPUFuture){ id };
+    EXIT();
 }
 
 size_t wgpuBufferGetSize(WGPUBuffer buffer){
+    ENTRY();
     WGPUDevice device = buffer->device;
     switch(buffer->allocationType){
         case AllocationTypeBuiltin:{
@@ -1653,9 +1688,11 @@ size_t wgpuBufferGetSize(WGPUBuffer buffer){
         rg_unreachable();
         
     }
+    EXIT();
 }
 
 void wgpuQueueWriteBuffer(WGPUQueue cSelf, WGPUBuffer buffer, uint64_t bufferOffset, const void* data, size_t size){
+    ENTRY();
     void* mappedMemory = NULL;
     if(buffer->memoryProperties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT){
         void* mappedMemory = NULL;
@@ -1677,9 +1714,11 @@ void wgpuQueueWriteBuffer(WGPUQueue cSelf, WGPUBuffer buffer, uint64_t bufferOff
         wgpuCommandEncoderCopyBufferToBuffer(cSelf->presubmitCache, stagingBuffer, 0, buffer, bufferOffset, size);
         wgpuBufferRelease(stagingBuffer);
     }
+    EXIT();
 }
 
 void wgpuQueueWriteTexture(WGPUQueue queue, const WGPUTexelCopyTextureInfo* destination, const void* data, size_t dataSize, const WGPUTexelCopyBufferLayout* dataLayout, const WGPUExtent3D* writeSize){
+    ENTRY();
 
     WGPUBufferDescriptor bdesc zeroinit;
     bdesc.size = dataSize;
@@ -1704,10 +1743,12 @@ void wgpuQueueWriteTexture(WGPUQueue queue, const WGPUTexelCopyTextureInfo* dest
     //wgpuCommandEncoderRelease(enkoder);
     //wgpuCommandBufferRelease(puffer);
     wgpuBufferRelease(stagingBuffer);
+    EXIT();
 }
 
 
 WGPUFence wgpuDeviceCreateFence(WGPUDevice device){
+    ENTRY();
     WGPUFence fence = RL_CALLOC(1, sizeof(WGPUFenceImpl));
     fence->refCount = 1;
     fence->device = device;
@@ -1715,8 +1756,10 @@ WGPUFence wgpuDeviceCreateFence(WGPUDevice device){
     VkFenceCreateInfo createInfo = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     fence->fence = FenceCache_GetFence(&device->fenceCache);
     return fence;
+    EXIT();
 }
 void wgpuFencesWait(const WGPUFence* fences, uint32_t fenceCount, uint64_t timeoutNS){
+    ENTRY();
     if(fenceCount){
         if(fenceCount <= 128){
             VkFence vkFences[128];
@@ -1726,7 +1769,8 @@ void wgpuFencesWait(const WGPUFence* fences, uint32_t fenceCount, uint64_t timeo
                     vkFences[actualFenceCount++] = fences[i]->fence;
                 }
             }
-            fences[0]->device->functions.vkWaitForFences(fences[0]->device->device, actualFenceCount, vkFences, VK_TRUE, timeoutNS);
+            VkResult fenceWaitResult = fences[0]->device->functions.vkWaitForFences(fences[0]->device->device, actualFenceCount, vkFences, VK_TRUE, timeoutNS);
+            wgvk_assert(fenceWaitResult == VK_SUCCESS, "Waiting for fence failed");
         }
         else{
             VkFence* vkFences = (VkFence*)RL_CALLOC(fenceCount, sizeof(VkFence));
@@ -1736,7 +1780,8 @@ void wgpuFencesWait(const WGPUFence* fences, uint32_t fenceCount, uint64_t timeo
                     vkFences[actualFenceCount++] = fences[i]->fence;
                 }
             }
-            fences[0]->device->functions.vkWaitForFences(fences[0]->device->device, actualFenceCount, vkFences, VK_TRUE, timeoutNS);
+            VkResult fenceWaitResult = fences[0]->device->functions.vkWaitForFences(fences[0]->device->device, actualFenceCount, vkFences, VK_TRUE, timeoutNS);
+            wgvk_assert(fenceWaitResult == VK_SUCCESS, "Waiting for fence failed");
             RL_FREE((void*)vkFences);
         }
         for(uint32_t i = 0;i < fenceCount;i++){
@@ -1748,8 +1793,10 @@ void wgpuFencesWait(const WGPUFence* fences, uint32_t fenceCount, uint64_t timeo
             }
         }
     }
+    EXIT();
 }
 RGAPI void wgpuFenceWait(WGPUFence fence, uint64_t timeoutNS){
+    ENTRY();
     VkResult waitResult = fence->device->functions.vkWaitForFences(fence->device->device, 1, &fence->fence, VK_TRUE, timeoutNS);
     if(waitResult == VK_SUCCESS){
         fence->state = WGPUFenceState_Finished;
@@ -1757,17 +1804,23 @@ RGAPI void wgpuFenceWait(WGPUFence fence, uint64_t timeoutNS){
             fence->callbacksOnWaitComplete.data[i].callback(fence->callbacksOnWaitComplete.data[i].userdata);
         }
     }
+    EXIT();
 }
 void wgpuFenceAttachCallback(WGPUFence fence, void(*callback)(void*), void* userdata){
+    ENTRY();
     CallbackWithUserdataVector_push_back(&fence->callbacksOnWaitComplete, (CallbackWithUserdata){
         .callback = callback,
         .userdata = userdata
     });
+    EXIT();
 }
 void wgpuFenceAddRef(WGPUFence fence){
+    ENTRY();
     ++fence->refCount;
+    EXIT();
 }
 void wgpuFenceRelease(WGPUFence fence){
+    ENTRY();
     wgvk_assert(fence->refCount > 0, "refCount already zero");
     if(--fence->refCount == 0){
         FenceCache_PutFence(&fence->device->fenceCache, fence->fence);
@@ -1780,9 +1833,11 @@ void wgpuFenceRelease(WGPUFence fence){
         CallbackWithUserdataVector_free(&fence->callbacksOnWaitComplete);
         RL_FREE(fence);
     }
+    EXIT();
 }
 
 WGPUTexture wgpuDeviceCreateTexture(WGPUDevice device, const WGPUTextureDescriptor* descriptor){
+    ENTRY();
     VkDeviceMemory imageMemory zeroinit;
     // Adjust usage flags based on format (e.g., depth formats might need different usages)
     WGPUTexture ret = RL_CALLOC(1, sizeof(WGPUTextureImpl));
@@ -1844,6 +1899,7 @@ WGPUTexture wgpuDeviceCreateTexture(WGPUDevice device, const WGPUTextureDescript
     ret->memory = imageMemory;
     Texture_ViewCache_init(&ret->viewCache);
     return ret;
+    EXIT();
 }
 
 static inline uint32_t descriptorTypeContiguous(VkDescriptorType type){
@@ -1898,6 +1954,7 @@ static inline VkDescriptorType contiguousDescriptorType(uint32_t cont){
 #define DESCRIPTOR_TYPE_UPPER_LIMIT 32
 
 void wgpuWriteBindGroup(WGPUDevice device, WGPUBindGroup wvBindGroup, const WGPUBindGroupDescriptor* bgdesc){
+    ENTRY();
     
     wgvk_assert(bgdesc->layout != NULL, "WGPUBindGroupDescriptor::layout is null");
     
@@ -2028,11 +2085,13 @@ void wgpuWriteBindGroup(WGPUDevice device, WGPUBindGroup wvBindGroup, const WGPU
     VkDescriptorBufferInfoVector_free(&bufferInfos);
     VkDescriptorImageInfoVector_free(&imageInfos);
     VkWriteDescriptorSetAccelerationStructureKHRVector_free(&accelStructInfos);
+    EXIT();
 }
 
 
 
 WGPUBindGroup wgpuDeviceCreateBindGroup(WGPUDevice device, const WGPUBindGroupDescriptor* bgdesc){
+    ENTRY();
     wgvk_assert(bgdesc->layout != NULL, "WGPUBindGroupDescriptor::layout is null");
     
     WGPUBindGroup ret = RL_CALLOC(1, sizeof(WGPUBindGroupImpl));
@@ -2098,11 +2157,13 @@ WGPUBindGroup wgpuDeviceCreateBindGroup(WGPUDevice device, const WGPUBindGroupDe
     ++ret->layout->refCount;
     wgvk_assert(ret->layout != NULL, "ret->layout is NULL");
     return ret;
+    EXIT();
 }
 
 
 
 WGPUBindGroupLayout wgpuDeviceCreateBindGroupLayout(WGPUDevice device, const WGPUBindGroupLayoutDescriptor* bgldesc){
+    ENTRY();
     WGPUBindGroupLayout ret = RL_CALLOC(1, sizeof(WGPUBindGroupLayoutImpl));
     ret->refCount = 1;
     ret->device = device;
@@ -2149,8 +2210,10 @@ WGPUBindGroupLayout wgpuDeviceCreateBindGroupLayout(WGPUDevice device, const WGP
     VkDescriptorSetLayoutBindingVector_free(&bindings);
     
     return ret;
+    EXIT();
 }
 void wgpuPipelineLayoutRelease(WGPUPipelineLayout pllayout){
+    ENTRY();
     if(!--pllayout->refCount){
         for(uint32_t i = 0;i < pllayout->bindGroupLayoutCount;i++){
             wgpuBindGroupLayoutRelease(pllayout->bindGroupLayouts[i]);
@@ -2159,8 +2222,10 @@ void wgpuPipelineLayoutRelease(WGPUPipelineLayout pllayout){
         RL_FREE((void*)pllayout->bindGroupLayouts);
         RL_FREE(pllayout);
     }
+    EXIT();
 }
 WGPUShaderModule wgpuDeviceCreateShaderModule(WGPUDevice device, const WGPUShaderModuleDescriptor* descriptor){
+    ENTRY();
     WGPUShaderModule ret = RL_CALLOC(1, sizeof(WGPUShaderModuleImpl));
     ret->refCount = 1;
     ret->device = device;
@@ -2231,10 +2296,12 @@ WGPUShaderModule wgpuDeviceCreateShaderModule(WGPUDevice device, const WGPUShade
             return NULL;
         }
     }
+    EXIT();
 }
 
 
 WGPUPipelineLayout wgpuDeviceCreatePipelineLayout(WGPUDevice device, const WGPUPipelineLayoutDescriptor* pldesc){
+    ENTRY();
     WGPUPipelineLayout ret = RL_CALLOC(1, sizeof(WGPUPipelineLayoutImpl));
     ret->refCount = 1;
     wgvk_assert(ret->bindGroupLayoutCount <= 8, "Only supports up to 8 BindGroupLayouts");
@@ -2258,10 +2325,12 @@ WGPUPipelineLayout wgpuDeviceCreatePipelineLayout(WGPUDevice device, const WGPUP
         ret = NULL;
     }
     return ret;
+    EXIT();
 }
 
 
 WGPUCommandEncoder wgpuDeviceCreateCommandEncoder(WGPUDevice device, const WGPUCommandEncoderDescriptor* desc){
+    ENTRY();
     WGPUCommandEncoder ret = RL_CALLOC(1, sizeof(WGPUCommandEncoderImpl));
     ret->cacheIndex = device->submittedFrames % framesInFlight;
     PerframeCache* cache = &device->frameCaches[ret->cacheIndex];
@@ -2275,7 +2344,7 @@ WGPUCommandEncoder wgpuDeviceCreateCommandEncoder(WGPUDevice device, const WGPUC
             .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
             .commandBufferCount = 1,
         };
-
+        printf("Allocating commandbuffer from pool %d\n", (int)ret->cacheIndex);
         device->functions.vkAllocateCommandBuffers(device->device, &bai, &ret->buffer);
     }
     else{
@@ -2294,9 +2363,11 @@ WGPUCommandEncoder wgpuDeviceCreateCommandEncoder(WGPUDevice device, const WGPUC
     device->functions.vkBeginCommandBuffer(ret->buffer, &bbi);
     
     return ret;
+    EXIT();
 }
 
 WGPUTextureView wgpuTextureCreateView(WGPUTexture texture, const WGPUTextureViewDescriptor *descriptor){
+    ENTRY();
 
     const VkImageViewCreateInfo ivci = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -2358,31 +2429,48 @@ WGPUTextureView wgpuTextureCreateView(WGPUTexture texture, const WGPUTextureView
     
     Texture_ViewCache_put(&texture->viewCache, key, ret);
     return ret;
+    EXIT();
 }
 
 uint32_t wgpuTextureGetDepthOrArrayLayers(WGPUTexture texture) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     return texture->depthOrArrayLayers;
+    EXIT();
 }
 WGPUTextureDimension wgpuTextureGetDimension(WGPUTexture texture) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     return fromVulkanTextureDimension(texture->dimension);
+    EXIT();
 }
 WGPUTextureFormat wgpuTextureGetFormat(WGPUTexture texture) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     return fromVulkanPixelFormat(texture->format);
+    EXIT();
 }
 uint32_t wgpuTextureGetHeight(WGPUTexture texture) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     return texture->height;
+    EXIT();
 }
 uint32_t wgpuTextureGetMipLevelCount(WGPUTexture texture) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     return texture->mipLevels;
+    EXIT();
 }
 uint32_t wgpuTextureGetSampleCount(WGPUTexture texture) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     return texture->sampleCount;
+    EXIT();
 }
 WGPUTextureUsage wgpuTextureGetUsage(WGPUTexture texture) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     return fromVulkanWGPUTextureUsage(texture->usage);
+    EXIT();
 }
 uint32_t wgpuTextureGetWidth(WGPUTexture texture) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     return texture->width;
+    EXIT();
 }
 
 static inline VkClearValue toVkCV(const WGPUColor c){
@@ -2397,6 +2485,7 @@ static inline VkClearValue toVkCV(const WGPUColor c){
 };
 
 WGPURenderBundleEncoder wgpuDeviceCreateRenderBundleEncoder(WGPUDevice device, const WGPURenderBundleEncoderDescriptor* descriptor){
+    ENTRY();
     WGPURenderBundleEncoder ret = RL_CALLOC(1, sizeof(WGPURenderBundleEncoderImpl));
     ret->refCount = 1;
     ret->device = device;
@@ -2435,8 +2524,10 @@ WGPURenderBundleEncoder wgpuDeviceCreateRenderBundleEncoder(WGPUDevice device, c
     //vkCmdSetScissor (ret->buffer, 0, 1, &dummy_scissor);
     return ret;
 
+    EXIT();
 }
 WGPURenderBundle wgpuRenderBundleEncoderFinish(WGPURenderBundleEncoder renderBundleEncoder, WGPU_NULLABLE WGPURenderBundleDescriptor const * descriptor){
+    ENTRY();
     WGPURenderBundle ret = RL_CALLOC(1, sizeof(WGPURenderBundleImpl));
     RenderPassCommandGenericVector_move(&ret->bufferedCommands, &renderBundleEncoder->bufferedCommands);
     renderBundleEncoder->movedFrom = 1;
@@ -2448,10 +2539,12 @@ WGPURenderBundle wgpuRenderBundleEncoderFinish(WGPURenderBundleEncoder renderBun
     //ret->device->functions.vkEndCommandBuffer(ret->commandBuffer);
     ret->refCount = 1;
     return ret;
+    EXIT();
 }
 
 
 void wgpuRenderBundleEncoderDraw(WGPURenderBundleEncoder renderBundleEncoder, uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     RenderPassCommandGeneric cmd = {
         .type = rp_command_type_draw,
         .draw = {
@@ -2462,9 +2555,11 @@ void wgpuRenderBundleEncoderDraw(WGPURenderBundleEncoder renderBundleEncoder, ui
         }
     };
     RenderPassCommandGenericVector_push_back(&renderBundleEncoder->bufferedCommands, cmd);
+    EXIT();
 }
 
 void wgpuRenderBundleEncoderDrawIndexed(WGPURenderBundleEncoder renderBundleEncoder, uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex, int32_t baseVertex, uint32_t firstInstance) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     RenderPassCommandGeneric cmd = {
         .type = rp_command_type_draw_indexed,
         .drawIndexed = {
@@ -2476,9 +2571,11 @@ void wgpuRenderBundleEncoderDrawIndexed(WGPURenderBundleEncoder renderBundleEnco
         }
     };
     RenderPassCommandGenericVector_push_back(&renderBundleEncoder->bufferedCommands, cmd);
+    EXIT();
 }
 
 void wgpuRenderBundleEncoderDrawIndexedIndirect(WGPURenderBundleEncoder renderBundleEncoder, WGPUBuffer indirectBuffer, uint64_t indirectOffset) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     RenderPassCommandGeneric cmd = {
         .type = rp_command_type_draw_indexed_indirect,
         .drawIndexedIndirect = {
@@ -2487,9 +2584,11 @@ void wgpuRenderBundleEncoderDrawIndexedIndirect(WGPURenderBundleEncoder renderBu
         }
     };
     RenderPassCommandGenericVector_push_back(&renderBundleEncoder->bufferedCommands, cmd);
+    EXIT();
 }
 
 void wgpuRenderBundleEncoderDrawIndirect(WGPURenderBundleEncoder renderBundleEncoder, WGPUBuffer indirectBuffer, uint64_t indirectOffset) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     RenderPassCommandGeneric cmd = {
         .type = rp_command_type_draw_indirect,
         .drawIndirect = {
@@ -2498,9 +2597,11 @@ void wgpuRenderBundleEncoderDrawIndirect(WGPURenderBundleEncoder renderBundleEnc
         }
     };
     RenderPassCommandGenericVector_push_back(&renderBundleEncoder->bufferedCommands, cmd);
+    EXIT();
 }
 
 void wgpuRenderBundleEncoderSetBindGroup(WGPURenderBundleEncoder renderBundleEncoder, uint32_t groupIndex, WGPU_NULLABLE WGPUBindGroup group, size_t dynamicOffsetCount, const uint32_t* dynamicOffsets) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     RenderPassCommandGeneric cmd = {
         .type = rp_command_type_set_bind_group,
         .setBindGroup = {
@@ -2512,9 +2613,11 @@ void wgpuRenderBundleEncoderSetBindGroup(WGPURenderBundleEncoder renderBundleEnc
         }
     };
     RenderPassCommandGenericVector_push_back(&renderBundleEncoder->bufferedCommands, cmd);
+    EXIT();
 }
 
 void wgpuRenderBundleEncoderSetIndexBuffer(WGPURenderBundleEncoder renderBundleEncoder, WGPUBuffer buffer, WGPUIndexFormat format, uint64_t offset, uint64_t size) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     
     RenderPassCommandGeneric cmd = {
         .type = rp_command_type_set_index_buffer,
@@ -2526,9 +2629,11 @@ void wgpuRenderBundleEncoderSetIndexBuffer(WGPURenderBundleEncoder renderBundleE
         }
     };
     RenderPassCommandGenericVector_push_back(&renderBundleEncoder->bufferedCommands, cmd);
+    EXIT();
 }
 
 void wgpuRenderBundleEncoderSetPipeline(WGPURenderBundleEncoder renderBundleEncoder, WGPURenderPipeline pipeline) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     RenderPassCommandGeneric cmd = {
         .type = rp_command_type_set_render_pipeline,
         .setRenderPipeline = {
@@ -2536,9 +2641,11 @@ void wgpuRenderBundleEncoderSetPipeline(WGPURenderBundleEncoder renderBundleEnco
         }
     };
     RenderPassCommandGenericVector_push_back(&renderBundleEncoder->bufferedCommands, cmd);
+    EXIT();
 }
 
 void wgpuRenderBundleEncoderSetVertexBuffer(WGPURenderBundleEncoder renderBundleEncoder, uint32_t slot, WGPU_NULLABLE WGPUBuffer buffer, uint64_t offset, uint64_t size) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     RenderPassCommandGeneric cmd = {
         .type = rp_command_type_set_vertex_buffer,
         .setVertexBuffer = {
@@ -2548,16 +2655,21 @@ void wgpuRenderBundleEncoderSetVertexBuffer(WGPURenderBundleEncoder renderBundle
         }
     };
     RenderPassCommandGenericVector_push_back(&renderBundleEncoder->bufferedCommands, cmd);
+    EXIT();
 }
 
 void wgpuRenderBundleEncoderAddRef(WGPURenderBundleEncoder renderBundleEncoder) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     ++renderBundleEncoder->refCount;
 
+    EXIT();
 }
 void wgpuRenderBundleEncoderRelease(WGPURenderBundleEncoder renderBundleEncoder) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     if(--renderBundleEncoder->refCount == 0){
         RL_FREE(renderBundleEncoder);
     }
+    EXIT();
 }
 
 
@@ -2575,6 +2687,7 @@ void wgpuRenderBundleEncoderRelease(WGPURenderBundleEncoder renderBundleEncoder)
 
 
 WGPURenderPassEncoder wgpuCommandEncoderBeginRenderPass(WGPUCommandEncoder enc, const WGPURenderPassDescriptor* rpdesc){
+    ENTRY();
     WGPURenderPassEncoder ret = RL_CALLOC(1, sizeof(WGPURenderPassEncoderImpl));
     VkCommandPool pool = enc->device->frameCaches[enc->cacheIndex].commandPool;
 
@@ -2725,9 +2838,11 @@ WGPURenderPassEncoder wgpuCommandEncoderBeginRenderPass(WGPUCommandEncoder enc, 
     }
     //wgpuRenderPassEncoderSetViewport(ret, 0, 0, rpdesc->colorAttachments[0].view->width, rpdesc->colorAttachments[0].view->height, 0, 1);
     return ret;
+    EXIT();
 }
 
 void wgpuRenderPassEncoderEnd(WGPURenderPassEncoder renderPassEncoder){
+    ENTRY();
     
     WGPUDevice device = renderPassEncoder->device;
     VkCommandBuffer destination = renderPassEncoder->cmdEncoder->buffer;
@@ -2960,6 +3075,7 @@ void wgpuRenderPassEncoderEnd(WGPURenderPassEncoder renderPassEncoder){
     #else
     device->functions.vkCmdEndRenderPass(destination);
     #endif
+    EXIT();
 }
 /**
  * @brief Ends a CommandEncoder into a CommandBuffer
@@ -2970,6 +3086,7 @@ void wgpuRenderPassEncoderEnd(WGPURenderPassEncoder renderPassEncoder){
  * 
  */
 WGPUCommandBuffer wgpuCommandEncoderFinish(WGPUCommandEncoder commandEncoder, const WGPUCommandBufferDescriptor* bufferdesc){
+    ENTRY();
     
     WGPUCommandBuffer ret = RL_CALLOC(1, sizeof(WGPUCommandBufferImpl));
     ret->refCount = 1;
@@ -2991,6 +3108,7 @@ WGPUCommandBuffer wgpuCommandEncoderFinish(WGPUCommandEncoder commandEncoder, co
     }
 
     return ret;
+    EXIT();
 }
 
 void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCommandGeneric* command, const RenderPassCommandBegin *beginInfo){
@@ -3021,6 +3139,14 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
             );
         }
         break;
+        case rp_command_type_set_stencil_reference: {
+            const RenderPassCommandSetStencilReference* setStencilReference = &command->setStencilReference;
+            //device->functions.vkCmdSetStencilReference(
+            //    destinationVk,
+            //    VK_STENCIL_FACE_FRONT_BIT | VK_STENCIL_FACE_BACK_BIT,
+            //    setStencilReference->reference
+            //);
+        }break;
         case rp_command_type_set_blend_constant:{
             const RenderPassCommandSetBlendConstant* setBlendConstant = &command->setBlendConstant;
             const float buffer[4] = {
@@ -3641,11 +3767,14 @@ void releaseCommandBuffersDependingOnFence(void* userdata){
     WGPUCommandBufferVector_free(bufferVector);
 }
 void wgpuQueueWaitIdle(WGPUQueue queue){
+    ENTRY();
     queue->device->functions.vkQueueWaitIdle(queue->graphicsQueue);
+    EXIT();
 }
 DEFINE_VECTOR_WITH_INLINE_STORAGE(static inline, CmdBarrierSet, CmdBarrierSetILVector, 4);
 const int use_single_submit = 1;
 void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuffer* buffers){
+    ENTRY();
 
     //VkCommandBufferVector submittable;
     WGPUCommandBufferVector submittableWGPU;
@@ -3745,6 +3874,13 @@ void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuff
             .pSignalSemaphores = queue->syncState[cacheIndex].semaphores.data + queue->syncState[cacheIndex].submits + 1,
             .pCommandBuffers = finalSubmittable.data,
         };
+        if(finalSubmittable.size){
+            printf("Submitting:\n");
+            for(uint32_t i = 0;i < finalSubmittable.size;i++){
+                printf("  %p\n", finalSubmittable.data[i]);
+            }
+            printf("with fence %p\n", fence);
+        }
         ++queue->syncState[cacheIndex].submits;
         WGPUFence submitFence = fence;
         submitResult = queue->device->functions.vkQueueSubmit(queue->graphicsQueue, 1, &submitInfo, submitFence ? submitFence->fence : VK_NULL_HANDLE);
@@ -3874,11 +4010,13 @@ void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuff
     queue->presubmitCache = wgpuDeviceCreateCommandEncoder(queue->device, &cedesc);
     //VkCommandBufferVector_free(&submittable);
     WGPUCommandBufferVector_free(&submittableWGPU);
+    EXIT();
 }
 
 
 
 void wgpuSurfaceGetCapabilities(WGPUSurface wgpuSurface, WGPUAdapter adapter, WGPUSurfaceCapabilities* capabilities){
+    ENTRY();
     if(wgpuSurface->capabilityCache.formatCount){
         *capabilities = wgpuSurface->capabilityCache;
         return;
@@ -3954,9 +4092,11 @@ void wgpuSurfaceGetCapabilities(WGPUSurface wgpuSurface, WGPUAdapter adapter, WG
     }
     wgpuSurface->capabilityCache.alphaModes = alphaModes;
     *capabilities = wgpuSurface->capabilityCache;
+    EXIT();
 }
 
 void wgpuSurfaceConfigure(WGPUSurface surface, const WGPUSurfaceConfiguration* config){
+    ENTRY();
     if(surface->swapchain){
         wgpuSurfaceUnconfigure(surface);
     }
@@ -4052,9 +4192,11 @@ void wgpuSurfaceConfigure(WGPUSurface surface, const WGPUSurfaceConfiguration* c
         VkSemaphoreCreateInfo vci = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
         device->functions.vkCreateSemaphore(device->device, &vci, NULL, surface->presentSemaphores + i);
     }
+    EXIT();
 }
 
 void wgpuSurfaceRelease(WGPUSurface surface){
+    ENTRY();
     if(--surface->refCount == 0){
         if(surface->swapchain){
             RL_FREE((void*)surface->images);
@@ -4064,9 +4206,11 @@ void wgpuSurfaceRelease(WGPUSurface surface){
             surface->device->functions.vkDestroySwapchainKHR(surface->device->device, surface->swapchain, NULL);
         }
     }
+    EXIT();
 }
 
 void wgpuComputePassEncoderDispatchWorkgroups(WGPUComputePassEncoder cpe, uint32_t x, uint32_t y, uint32_t z){
+    ENTRY();
     RenderPassCommandGeneric insert = {
         .type = cp_command_type_dispatch_workgroups,
         .dispatchWorkgroups = {x, y, z}
@@ -4074,6 +4218,7 @@ void wgpuComputePassEncoderDispatchWorkgroups(WGPUComputePassEncoder cpe, uint32
     
 
     RenderPassCommandGenericVector_push_back(&cpe->bufferedCommands, insert);
+    EXIT();
 }
 
 static void releaseRPSetCallback(WGPURenderPassEncoder rpEncoder, void* unused){
@@ -4089,6 +4234,7 @@ static void releaseRTSetCallback(WGPURaytracingPassEncoder rtEncoder, void* unus
 }
 
 void wgpuCommandEncoderRelease(WGPUCommandEncoder commandEncoder) {
+    ENTRY();
     WGPUCommandEncoder commandBuffer = commandEncoder;
     //wgvk_assert(commandEncoder->movedFrom, "Commandencoder still valid");
     if(--commandEncoder->refCount == 0){
@@ -4114,9 +4260,11 @@ void wgpuCommandEncoderRelease(WGPUCommandEncoder commandEncoder) {
     }
     
     RL_FREE(commandEncoder);
+    EXIT();
 }
 
 void wgpuCommandBufferRelease(WGPUCommandBuffer commandBuffer) {
+    ENTRY();
     if(--commandBuffer->refCount == 0){
         WGPURenderPassEncoderSet_for_each(&commandBuffer->referencedRPs, releaseRPSetCallback, NULL);
         WGPUComputePassEncoderSet_for_each(&commandBuffer->referencedCPs, releaseCPSetCallback, NULL);
@@ -4137,12 +4285,16 @@ void wgpuCommandBufferRelease(WGPUCommandBuffer commandBuffer) {
         }
         RL_FREE(commandBuffer);
     }
+    EXIT();
 }
 void wgpuRenderPassEncoderAddRef(WGPURenderPassEncoder rpenc) {
+    ENTRY();
     ++rpenc->refCount;
+    EXIT();
 }
 
 void wgpuRenderPassEncoderRelease(WGPURenderPassEncoder rpenc) {
+    ENTRY();
     if (--rpenc->refCount == 0) {
         releaseAllAndClear(&rpenc->resourceUsage);
         if(rpenc->frameBuffer){
@@ -4152,9 +4304,11 @@ void wgpuRenderPassEncoderRelease(WGPURenderPassEncoder rpenc) {
         RenderPassCommandGenericVector_free(&rpenc->bufferedCommands);
         RL_FREE(rpenc);
     }
+    EXIT();
 }
 
 void wgpuShaderModuleRelease(WGPUShaderModule module){
+    ENTRY();
     if(--module->refCount == 0){
         
         module->device->functions.vkDestroyShaderModule(module->device->device, module->vulkanModuleMultiEP, NULL);
@@ -4168,30 +4322,38 @@ void wgpuShaderModuleRelease(WGPUShaderModule module){
         RL_FREE(module->source);
         RL_FREE(module);
     }
+    EXIT();
 }
 void wgpuSamplerRelease(WGPUSampler sampler){
+    ENTRY();
     if(!--sampler->refCount){
         sampler->device->functions.vkDestroySampler(sampler->device->device, sampler->sampler, NULL);
         RL_FREE(sampler);
     }
+    EXIT();
 }
 void wgpuRenderPipelineRelease(WGPURenderPipeline pipeline){
+    ENTRY();
     if(--pipeline->refCount == 0){
         wgpuPipelineLayoutRelease(pipeline->layout);
         pipeline->device->functions.vkDestroyPipeline(pipeline->device->device, pipeline->renderPipeline, NULL);
         RL_FREE(pipeline);
     }
+    EXIT();
 }
 
 void wgpuComputePipelineRelease(WGPUComputePipeline pipeline){
+    ENTRY();
     if(!--pipeline->refCount){
         wgpuPipelineLayoutRelease(pipeline->layout);
         pipeline->device->functions.vkDestroyPipeline(pipeline->device->device, pipeline->computePipeline, NULL);
         RL_FREE(pipeline);
     }
+    EXIT();
 }
 
 void wgpuBufferRelease(WGPUBuffer buffer) {
+    ENTRY();
     --buffer->refCount;
     if (buffer->refCount == 0) {
         if(buffer->latestFence){
@@ -4213,9 +4375,11 @@ void wgpuBufferRelease(WGPUBuffer buffer) {
         }
         RL_FREE(buffer);
     }
+    EXIT();
 }
 
 void wgpuBindGroupRelease(WGPUBindGroup dshandle) {
+    ENTRY();
     --dshandle->refCount;
     if (dshandle->refCount == 0) {
         releaseAllAndClear(&dshandle->resourceUsage);
@@ -4245,37 +4409,51 @@ void wgpuBindGroupRelease(WGPUBindGroup dshandle) {
         
         RL_FREE(dshandle);
     }
+    EXIT();
 }
 void wgpuInstanceAddRef                       (WGPUInstance instance){
+    ENTRY();
     ++instance->refCount;
+    EXIT();
 }
 void wgpuAdapterAddRef                        (WGPUAdapter adapter){
+    ENTRY();
     ++adapter->refCount;
+    EXIT();
 }
 void wgpuDeviceAddRef                         (WGPUDevice device){
+    ENTRY();
     ++device->refCount;
+    EXIT();
 }
 void wgpuQueueAddRef                          (WGPUQueue queue){
+    ENTRY();
     ++queue->refCount;
+    EXIT();
 }
 
 void wgpuInstanceRelease                      (WGPUInstance instance){
+    ENTRY();
     if(--instance->refCount == 0){
         vkDestroyDebugUtilsMessengerEXT(instance->instance, instance->debugMessenger, NULL);
         vkDestroyInstance(instance->instance, NULL);
         FutureIDMap_free(&instance->g_futureIDMap);
         RL_FREE(instance);
     }
+    EXIT();
 }
 
 void wgpuAdapterRelease(WGPUAdapter adapter){
+    ENTRY();
     if(--adapter->refCount == 0){
         wgpuInstanceRelease(adapter->instance);
         RL_FREE(adapter);
     }
+    EXIT();
 }
 void resetFenceAndReleaseBuffers(void* fence_, WGPUCommandBufferVector* cBuffers, void* wgpudevice);
 void wgpuDeviceRelease(WGPUDevice device){
+    ENTRY();
     if(--device->refCount == 0){
         WGPUCommandBuffer cBuffer = wgpuCommandEncoderFinish(device->queue->presubmitCache, NULL);
         wgpuCommandEncoderRelease(device->queue->presubmitCache);
@@ -4348,14 +4526,18 @@ void wgpuDeviceRelease(WGPUDevice device){
         RL_FREE(device->queue);
         RL_FREE(device);
     }
+    EXIT();
 }
 void wgpuQueueRelease                         (WGPUQueue queue){
+    ENTRY();
     if(--queue->refCount == 0){
         //wgpuDeviceRelease(queue->device);
     }
+    EXIT();
 }
 
 WGPUComputePipeline wgpuDeviceCreateComputePipeline(WGPUDevice device, WGPUComputePipelineDescriptor const * descriptor){
+    ENTRY();
     WGPUComputePipeline ret = RL_CALLOC(1, sizeof(WGPUComputePipelineImpl));
     ret->device = device;
     ret->refCount = 1;
@@ -4389,10 +4571,12 @@ WGPUComputePipeline wgpuDeviceCreateComputePipeline(WGPUDevice device, WGPUCompu
     ret->layout = descriptor->layout;
     wgpuPipelineLayoutAddRef(ret->layout);
     return ret;
+    EXIT();
 }
 
 
 WGPURenderPipeline wgpuDeviceCreateRenderPipeline(WGPUDevice device, const WGPURenderPipelineDescriptor* descriptor) {
+    ENTRY();
     WGPUDeviceImpl* deviceImpl = (WGPUDeviceImpl*)(device);
     WGPUPipelineLayout pl_layout = descriptor->layout;
 
@@ -4746,8 +4930,10 @@ WGPURenderPipeline wgpuDeviceCreateRenderPipeline(WGPUDevice device, const WGPUR
     }
 
     return pipelineImpl;
+    EXIT();
 }
 void wgpuBindGroupLayoutRelease(WGPUBindGroupLayout bglayout){
+    ENTRY();
     --bglayout->refCount;
     if(bglayout->refCount == 0){
         WGPUDevice device = bglayout->device;
@@ -4764,9 +4950,11 @@ void wgpuBindGroupLayoutRelease(WGPUBindGroupLayout bglayout){
         RL_FREE((void*)bglayout->entries);
         RL_FREE((void*)bglayout);
     }
+    EXIT();
 }
 
 void wgpuTextureRelease(WGPUTexture texture){
+    ENTRY();
     --texture->refCount;
     if(texture->refCount == 0){
         WGPUDevice device = texture->device;
@@ -4782,8 +4970,10 @@ void wgpuTextureRelease(WGPUTexture texture){
         Texture_ViewCache_free(&texture->viewCache);
         RL_FREE(texture);
     }
+    EXIT();
 }
 void wgpuTextureViewRelease(WGPUTextureView view){
+    ENTRY();
     --view->refCount;
     if(view->refCount == 0){
         wgpuTextureRelease(view->texture);
@@ -4791,9 +4981,11 @@ void wgpuTextureViewRelease(WGPUTextureView view){
         // view->texture->device->functions.vkDestroyImageView(view->texture->device->device, view->view, NULL);
         // RL_FREE(view);
     }
+    EXIT();
 }
 
 void wgpuCommandEncoderCopyBufferToBuffer  (WGPUCommandEncoder commandEncoder, WGPUBuffer source, uint64_t sourceOffset, WGPUBuffer destination, uint64_t destinationOffset, uint64_t size){
+    ENTRY();
     ++commandEncoder->encodedCommandCount;
     ce_trackBuffer(
         commandEncoder,
@@ -4836,8 +5028,10 @@ void wgpuCommandEncoderCopyBufferToBuffer  (WGPUCommandEncoder commandEncoder, W
             0, NULL
         );
     }
+    EXIT();
 }
 void wgpuCommandEncoderCopyBufferToTexture (WGPUCommandEncoder commandEncoder, WGPUTexelCopyBufferInfo const * source, WGPUTexelCopyTextureInfo const * destination, WGPUExtent3D const * copySize){
+    ENTRY();
     
     VkImageCopy copy;
     VkBufferImageCopy region zeroinit;
@@ -4878,8 +5072,10 @@ void wgpuCommandEncoderCopyBufferToTexture (WGPUCommandEncoder commandEncoder, W
     });
 
     commandEncoder->device->functions.vkCmdCopyBufferToImage(commandEncoder->buffer, source->buffer->buffer, destination->texture->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    EXIT();
 }
 void wgpuCommandEncoderCopyTextureToBuffer (WGPUCommandEncoder commandEncoder, const WGPUTexelCopyTextureInfo* source, const WGPUTexelCopyBufferInfo* destination, const WGPUExtent3D* copySize){
+    ENTRY();
     ++commandEncoder->encodedCommandCount;
     ce_trackTexture(
         commandEncoder,
@@ -4927,8 +5123,10 @@ void wgpuCommandEncoderCopyTextureToBuffer (WGPUCommandEncoder commandEncoder, c
         destination->buffer->buffer,
         1, &region
     );
+    EXIT();
 }
 void wgpuCommandEncoderCopyTextureToTexture(WGPUCommandEncoder commandEncoder, const WGPUTexelCopyTextureInfo* source, const WGPUTexelCopyTextureInfo* destination, const WGPUExtent3D* copySize){
+    ENTRY();
     ++commandEncoder->encodedCommandCount;
     ce_trackTexture(
         commandEncoder,
@@ -4990,6 +5188,7 @@ void wgpuCommandEncoderCopyTextureToTexture(WGPUCommandEncoder commandEncoder, c
         1, &region,
         VK_FILTER_NEAREST
     );
+    EXIT();
 }
 void RenderPassEncoder_PushCommand(WGPURenderPassEncoder encoder, const RenderPassCommandGeneric* cmd){
     if(cmd->type == rp_command_type_set_render_pipeline){
@@ -5015,6 +5214,7 @@ void RaytracingPassEncoder_PushCommand(WGPURaytracingPassEncoder encoder, const 
 
 // Implementation of RenderpassEncoderDraw
 void wgpuRenderPassEncoderDraw(WGPURenderPassEncoder rpe, uint32_t vertices, uint32_t instances, uint32_t firstvertex, uint32_t firstinstance) {
+    ENTRY();
     wgvk_assert(rpe != NULL, "RenderPassEncoderHandle is null");
     RenderPassCommandGeneric insert = {
         .type = rp_command_type_draw,
@@ -5027,10 +5227,12 @@ void wgpuRenderPassEncoderDraw(WGPURenderPassEncoder rpe, uint32_t vertices, uin
     };
 
     RenderPassEncoder_PushCommand(rpe, &insert);
+    EXIT();
 }
 
 // Implementation of RenderpassEncoderDrawIndexed
 void wgpuRenderPassEncoderDrawIndexed(WGPURenderPassEncoder rpe, uint32_t indices, uint32_t instances, uint32_t firstindex, int32_t baseVertex, uint32_t firstinstance) {
+    ENTRY();
     wgvk_assert(rpe != NULL, "RenderPassEncoderHandle is null");
     RenderPassCommandGeneric insert = {
         .type = rp_command_type_draw_indexed,
@@ -5047,9 +5249,11 @@ void wgpuRenderPassEncoderDrawIndexed(WGPURenderPassEncoder rpe, uint32_t indice
     RenderPassEncoder_PushCommand(rpe, &insert);
     
     //vkCmdDrawIndexed(rpe->secondaryCmdBuffer, indices, instances, firstindex, (int32_t)(baseVertex & 0x7fffffff), firstinstance);
+    EXIT();
 }
 
 void wgpuRenderPassEncoderSetPipeline(WGPURenderPassEncoder rpe, WGPURenderPipeline renderPipeline) {
+    ENTRY();
     RenderPassCommandGeneric insert = {
         .type = rp_command_type_set_render_pipeline,
         .setRenderPipeline = {
@@ -5058,9 +5262,11 @@ void wgpuRenderPassEncoderSetPipeline(WGPURenderPassEncoder rpe, WGPURenderPipel
     };
     RenderPassEncoder_PushCommand(rpe, &insert);
     ru_trackRenderPipeline(&rpe->resourceUsage, renderPipeline);
+    EXIT();
 }
 
 void wgpuRenderPassEncoderSetBindGroup(WGPURenderPassEncoder rpe, uint32_t groupIndex, WGPUBindGroup group, size_t dynamicOffsetCount, const uint32_t* dynamicOffsets) {
+    ENTRY();
     wgvk_assert(rpe != NULL, "RenderPassEncoderHandle is null");
     wgvk_assert(group != NULL, "DescriptorSetHandle is null");
 
@@ -5112,9 +5318,11 @@ void wgpuRenderPassEncoderSetBindGroup(WGPURenderPassEncoder rpe, uint32_t group
     error:
     abort();
     
+    EXIT();
 }
 
 void wgpuComputePassEncoderSetPipeline (WGPUComputePassEncoder cpe, WGPUComputePipeline computePipeline){
+    ENTRY();
     
     RenderPassCommandGeneric insert = {
         .type = cp_command_type_set_compute_pipeline,
@@ -5124,8 +5332,10 @@ void wgpuComputePassEncoderSetPipeline (WGPUComputePassEncoder cpe, WGPUComputeP
     };
 
     ComputePassEncoder_PushCommand(cpe, &insert);
+    EXIT();
 }
 void wgpuComputePassEncoderSetBindGroup(WGPUComputePassEncoder cpe, uint32_t groupIndex, WGPUBindGroup group, size_t dynamicOffsetCount, const uint32_t* dynamicOffsets){
+    ENTRY();
     
     RenderPassCommandGeneric insert = {
         .type = rp_command_type_set_bind_group,
@@ -5152,9 +5362,11 @@ void wgpuComputePassEncoderSetBindGroup(WGPUComputePassEncoder cpe, uint32_t gro
     //}
 
     ComputePassEncoder_PushCommand(cpe, &insert);
+    EXIT();
 }
 
 WGPUComputePassEncoder wgpuCommandEncoderBeginComputePass(WGPUCommandEncoder commandEncoder, const WGPUComputePassDescriptor* cpdesc){
+    ENTRY();
     WGPUComputePassEncoder ret = RL_CALLOC(1, sizeof(WGPUComputePassEncoderImpl));
     ++commandEncoder->encodedCommandCount;
     ret->refCount = 2;
@@ -5165,25 +5377,32 @@ WGPUComputePassEncoder wgpuCommandEncoderBeginComputePass(WGPUCommandEncoder com
     ret->cmdEncoder = commandEncoder;
     ret->device = commandEncoder->device;
     return ret;
+    EXIT();
 }
 void wgpuComputePassEncoderEnd(WGPUComputePassEncoder commandEncoder){
+    ENTRY();
     recordVkCommands(commandEncoder->cmdEncoder, commandEncoder->device, &commandEncoder->bufferedCommands, NULL);
+    EXIT();
 }
 void wgpuComputePassEncoderRelease(WGPUComputePassEncoder cpenc){
+    ENTRY();
     --cpenc->refCount;
     if(cpenc->refCount == 0){
         releaseAllAndClear(&cpenc->resourceUsage);
         RenderPassCommandGenericVector_free(&cpenc->bufferedCommands);
         RL_FREE(cpenc);
     }
+    EXIT();
 }
 
 void wgpuReleaseRaytracingPassEncoder(WGPURaytracingPassEncoder rtenc){
+    ENTRY();
     --rtenc->refCount;
     if(rtenc->refCount == 0){
         releaseAllAndClear(&rtenc->resourceUsage);
         RL_FREE(rtenc);
     }
+    EXIT();
 }
 
 void pcmNonnullFlattenCallback(void* fence_, WGPUCommandBufferVector* key, void* userdata){
@@ -5197,6 +5416,7 @@ void pcmNonnullFlattenCallback(void* fence_, WGPUCommandBufferVector* key, void*
 
 
 WGPURaytracingPassEncoder wgpuCommandEncoderBeginRaytracingPass(WGPUCommandEncoder enc, const WGPURayTracingPassDescriptor* rtDesc){
+    ENTRY();
     WGPURaytracingPassEncoder rtenc = RL_CALLOC(1, sizeof(WGPURaytracingPassEncoderImpl));
     rtenc->device = enc->device;
     rtenc->refCount = 2;
@@ -5204,10 +5424,13 @@ WGPURaytracingPassEncoder wgpuCommandEncoderBeginRaytracingPass(WGPUCommandEncod
     rtenc->cmdEncoder = enc;
     rtenc->cmdBuffer = enc->buffer;
     return rtenc;
+    EXIT();
 }
 
 void wgpuRaytracingPassEncoderEnd(WGPURaytracingPassEncoder commandEncoder){
+    ENTRY();
     recordVkCommands(commandEncoder->cmdEncoder, commandEncoder->device, &commandEncoder->bufferedCommands, NULL);
+    EXIT();
 }
 
 
@@ -5242,6 +5465,7 @@ void resetFenceAndReleaseBuffers(void* fence_, WGPUCommandBufferVector* cBuffers
 }
 
 void wgpuSurfaceGetCurrentTexture(WGPUSurface surface, WGPUSurfaceTexture* surfaceTexture){
+    ENTRY();
     const size_t submittedframes = surface->device->submittedFrames;
     const uint32_t cacheIndex = surface->device->submittedFrames % framesInFlight;
     if(surface->swapchain){
@@ -5280,9 +5504,11 @@ void wgpuSurfaceGetCurrentTexture(WGPUSurface surface, WGPUSurfaceTexture* surfa
     else{
         DeviceCallback(surface->device, WGPUErrorType_Validation, STRVIEW("Surface is not configured"));
     }
+    EXIT();
 }
 
 void wgpuSurfacePresent(WGPUSurface surface){
+    ENTRY();
     WGPUDevice device = surface->device;
     uint32_t cacheIndex = surface->device->submittedFrames % framesInFlight;
 
@@ -5337,6 +5563,7 @@ void wgpuSurfacePresent(WGPUSurface surface){
     
     WGPUFence finalTransitionFence = surface->device->frameCaches[cacheIndex].finalTransitionFence;
     wgpuFenceAddRef(finalTransitionFence);
+    printf("Submitting %p with fence %p\n", transitionBuffer, finalTransitionFence);
     device->functions.vkQueueSubmit(surface->device->queue->graphicsQueue, 1, &cbsinfo, finalTransitionFence->fence);
     
     finalTransitionFence->state = WGPUFenceState_InUse;
@@ -5358,13 +5585,16 @@ void wgpuSurfacePresent(WGPUSurface surface){
         .pSwapchains = &surface->swapchain,
         .pImageIndices = &surface->activeImageIndex,
     };
+
     VkResult presentRes = device->functions.vkQueuePresentKHR(surface->device->queue->presentQueue, &presentInfo);
     if(presentRes != VK_SUCCESS){
         fprintf(stderr, "vkQueuePresentKHR returned %s\n", vkErrorString(presentRes));
     }
     wgpuDeviceTick(surface->device);
+    EXIT();
 }
 void wgpuDeviceTick(WGPUDevice device){
+    ENTRY();
     WGPUQueue queue = device->queue;
     WGPUCommandBuffer buffer = wgpuCommandEncoderFinish(queue->presubmitCache, NULL);
     wgpuCommandEncoderRelease(queue->presubmitCache);
@@ -5379,7 +5609,7 @@ void wgpuDeviceTick(WGPUDevice device){
             VkSubmitInfo emptySubmit = {
                 .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
                 .waitSemaphoreCount = 1,
-                .pWaitSemaphores = queue->syncState[toBeFinishedCacheIndex].semaphores.data + tsubmits,
+                .pWaitSemaphores = VkSemaphoreVector_get(&queue->syncState[toBeFinishedCacheIndex].semaphores, tsubmits),
                 .pWaitDstStageMask = &waitmask
             };
             device->functions.vkQueueSubmit(device->queue->graphicsQueue, 1, &emptySubmit, device->frameCaches[toBeFinishedCacheIndex].finalTransitionFence->fence);
@@ -5394,7 +5624,8 @@ void wgpuDeviceTick(WGPUDevice device){
                 PendingCommandBufferMap_put(pcmap, ftf, insert);
                 inserted = PendingCommandBufferMap_get(pcmap, ftf);
             }
-            WGPUCommandBufferVector_init(inserted);
+            //WGPUCommandBufferVector_push_back(inserted, WGPUCommandBuffer value)
+            //WGPUCommandBufferVector_init(inserted);
         }
     }
     
@@ -5417,6 +5648,10 @@ void wgpuDeviceTick(WGPUDevice device){
         PendingCommandBufferMap_for_each(pcm, pcmNonnullFlattenCallback, (void*)&fences);
         if(fences.size > 0){
             wgpuFencesWait(fences.data, fences.size, UINT32_MAX);
+            //printf("Waiting for fences:\n");
+            //for(uint32_t i = 0;i < fences.size;i++){
+            //    printf("  %p\n", fences.data[i]);
+            //}
         }
     }
     else{
@@ -5444,9 +5679,11 @@ void wgpuDeviceTick(WGPUDevice device){
     WGPUCommandEncoderDescriptor cedesc zeroinit;
     device->queue->presubmitCache = wgpuDeviceCreateCommandEncoder(device, &cedesc);
     queue->syncState[cacheIndex].submits = 0;
+    EXIT();
 }
 
 WGPUSampler wgpuDeviceCreateSampler(WGPUDevice device, const WGPUSamplerDescriptor* descriptor){
+    ENTRY();
     WGPUSampler ret = RL_CALLOC(1, sizeof(WGPUSamplerImpl));
     ret->refCount = 1;
     ret->device = device;
@@ -5468,8 +5705,10 @@ WGPUSampler wgpuDeviceCreateSampler(WGPUDevice device, const WGPUSamplerDescript
     };
     VkResult result = device->functions.vkCreateSampler(device->device, &sci, NULL, &(ret->sampler));
     return ret;
+    EXIT();
 }
 void wgpuRenderPassEncoderSetVertexBuffer(WGPURenderPassEncoder rpe, uint32_t binding, WGPUBuffer buffer, VkDeviceSize offset, uint64_t size) {
+    ENTRY();
     wgvk_assert(rpe != NULL, "RenderPassEncoderHandle is null");
     wgvk_assert(buffer != NULL, "BufferHandle is null");
     RenderPassCommandGeneric insert = {
@@ -5484,9 +5723,11 @@ void wgpuRenderPassEncoderSetVertexBuffer(WGPURenderPassEncoder rpe, uint32_t bi
     RenderPassEncoder_PushCommand(rpe, &insert);
     
     ce_trackBuffer(rpe->cmdEncoder, buffer, (BufferUsageSnap){VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT});
+    EXIT();
 }
 
 void wgpuRenderPassEncoderExecuteBundles(WGPURenderPassEncoder renderPassEncoder, size_t bundleCount, const WGPURenderBundle* bundles) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     wgvk_assert(renderPassEncoder != NULL, "RenderPassEncoderHandle is null");
     for(uint32_t i = 0;i < bundleCount;i++){
         RenderPassCommandGeneric insert = {
@@ -5498,10 +5739,12 @@ void wgpuRenderPassEncoderExecuteBundles(WGPURenderPassEncoder renderPassEncoder
         RenderPassCommandGenericVector_push_back(&renderPassEncoder->bufferedCommands, insert);
         ru_trackRenderBundle(&renderPassEncoder->resourceUsage, bundles[i]);
     }
+    EXIT();
 }
 
 
 void wgpuRenderPassEncoderDrawIndexedIndirect(WGPURenderPassEncoder renderPassEncoder, WGPUBuffer indirectBuffer, uint64_t indirectOffset) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     RenderPassCommandGeneric insert = {
         .type = rp_command_type_draw_indexed_indirect,
         .drawIndexedIndirect = {
@@ -5510,8 +5753,10 @@ void wgpuRenderPassEncoderDrawIndexedIndirect(WGPURenderPassEncoder renderPassEn
         }
     };
     RenderPassEncoder_PushCommand(renderPassEncoder, &insert);
+    EXIT();
 }
 void wgpuRenderPassEncoderDrawIndirect           (WGPURenderPassEncoder renderPassEncoder, WGPUBuffer indirectBuffer, uint64_t indirectOffset) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     RenderPassCommandGeneric insert = {
         .type = rp_command_type_draw_indirect,
         .drawIndirect = {
@@ -5520,8 +5765,10 @@ void wgpuRenderPassEncoderDrawIndirect           (WGPURenderPassEncoder renderPa
         }
     };
     RenderPassEncoder_PushCommand(renderPassEncoder, &insert);
+    EXIT();
 }
 void wgpuRenderPassEncoderSetBlendConstant       (WGPURenderPassEncoder renderPassEncoder, const WGPUColor* color) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     RenderPassCommandGeneric insert = {
         .type = rp_command_type_set_blend_constant,
         .setBlendConstant = {
@@ -5529,8 +5776,10 @@ void wgpuRenderPassEncoderSetBlendConstant       (WGPURenderPassEncoder renderPa
         }
     };
     RenderPassEncoder_PushCommand(renderPassEncoder, &insert);
+    EXIT();
 }
 void wgpuRenderPassEncoderSetViewport            (WGPURenderPassEncoder renderPassEncoder, float x, float y, float width, float height, float minDepth, float maxDepth) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     RenderPassCommandGeneric insert = {
         .type = rp_command_type_set_viewport,
         .setViewport = {
@@ -5543,8 +5792,10 @@ void wgpuRenderPassEncoderSetViewport            (WGPURenderPassEncoder renderPa
         }
     };
     RenderPassEncoder_PushCommand(renderPassEncoder, &insert);
+    EXIT();
 }
 void wgpuRenderPassEncoderSetScissorRect         (WGPURenderPassEncoder renderPassEncoder, uint32_t x, uint32_t y, uint32_t width, uint32_t height) WGPU_FUNCTION_ATTRIBUTE{
+    ENTRY();
     RenderPassCommandGeneric insert = {
         .type = rp_command_type_set_scissor_rect,
         .setScissorRect = {
@@ -5552,9 +5803,11 @@ void wgpuRenderPassEncoderSetScissorRect         (WGPURenderPassEncoder renderPa
         }
     };
     RenderPassEncoder_PushCommand(renderPassEncoder, &insert);
+    EXIT();
 }
 
 void wgpuRenderPassEncoderSetIndexBuffer(WGPURenderPassEncoder rpe, WGPUBuffer buffer, WGPUIndexFormat format, uint64_t offset, uint64_t size) {
+    ENTRY();
     wgvk_assert(rpe != NULL, "RenderPassEncoderHandle is null");
     wgvk_assert(buffer != NULL, "BufferHandle is null");
     
@@ -5574,36 +5827,57 @@ void wgpuRenderPassEncoderSetIndexBuffer(WGPURenderPassEncoder rpe, WGPUBuffer b
         .stage = VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 
         .access = VK_ACCESS_INDEX_READ_BIT
     });
+    EXIT();
 }
 void wgpuTextureViewAddRef(WGPUTextureView textureView){
+    ENTRY();
     ++textureView->refCount;
+    EXIT();
 }
 void wgpuTextureAddRef(WGPUTexture texture){
+    ENTRY();
     ++texture->refCount;
+    EXIT();
 }
 void wgpuBufferAddRef(WGPUBuffer buffer){
+    ENTRY();
     ++buffer->refCount;
+    EXIT();
 }
 void wgpuBindGroupAddRef(WGPUBindGroup bindGroup){
+    ENTRY();
     ++bindGroup->refCount;
+    EXIT();
 }
 void wgpuBindGroupLayoutAddRef(WGPUBindGroupLayout bindGroupLayout){
+    ENTRY();
     ++bindGroupLayout->refCount;
+    EXIT();
 }
 void wgpuPipelineLayoutAddRef(WGPUPipelineLayout pipelineLayout){
+    ENTRY();
     ++pipelineLayout->refCount;
+    EXIT();
 }
 void wgpuSamplerAddRef(WGPUSampler sampler){
+    ENTRY();
     ++sampler->refCount;
+    EXIT();
 }
 void wgpuRenderPipelineAddRef(WGPURenderPipeline rpl){
+    ENTRY();
     ++rpl->refCount;
+    EXIT();
 }
 void wgpuComputePipelineAddRef(WGPUComputePipeline cpl){
+    ENTRY();
     ++cpl->refCount;
+    EXIT();
 }
 void wgpuShaderModuleAddRef(WGPUShaderModule module){
+    ENTRY();
     ++module->refCount;
+    EXIT();
 }
 
 RGAPI void ru_trackBuffer(ResourceUsage* resourceUsage, WGPUBuffer buffer, BufferUsageRecord brecord){
@@ -6250,6 +6524,7 @@ WGPUReflectionAttribute spvReflectToWGPUReflectAttrib(SpvReflectInterfaceVariabl
     return result;
 }
 static void wgpuShaderModuleGetReflectionInfo_sync(void* userdata_){
+    ENTRY();
     struct wgpuShaderModuleGetReflectionInfo_sync_userdata* userdata = (struct wgpuShaderModuleGetReflectionInfo_sync_userdata*)userdata_;
     WGPUShaderModule module = userdata->module;
     
@@ -6340,9 +6615,11 @@ static void wgpuShaderModuleGetReflectionInfo_sync(void* userdata_){
         rg_unreachable();
     }
     
+    EXIT();
 }
 
 WGPUFuture wgpuShaderModuleGetReflectionInfo(WGPUShaderModule shaderModule, WGPUReflectionInfoCallbackInfo callbackInfo){
+    ENTRY();
     struct wgpuShaderModuleGetReflectionInfo_sync_userdata* udff = RL_CALLOC(1, sizeof(struct wgpuShaderModuleGetReflectionInfo_sync_userdata));
     WGPUInstance instance = shaderModule->device->adapter->instance;
     udff->callbackInfo = callbackInfo;
@@ -6355,21 +6632,41 @@ WGPUFuture wgpuShaderModuleGetReflectionInfo(WGPUShaderModule shaderModule, WGPU
     WGPUFuture rete = { shaderModule->device->adapter->instance->currentFutureId++ };
     FutureIDMap_put(&instance->g_futureIDMap, rete.id, ret);
     return rete;
+    EXIT();
 }
 
-void wgpuAdapterInfoFreeMembers(WGPUAdapterInfo value) {}
-WGPUStatus wgpuGetInstanceCapabilities(WGPUInstanceCapabilities * capabilities) { return WGPUStatus_Error; }
-WGPUProc wgpuGetProcAddress(WGPUStringView procName) { return NULL; }
+void wgpuAdapterInfoFreeMembers(WGPUAdapterInfo value) {
+    ENTRY();
+    (void)value;
+    EXIT();
+}
+WGPUStatus wgpuGetInstanceCapabilities(WGPUInstanceCapabilities * capabilities) {                                                                                   ENTRY();
+return WGPUStatus_Error;                                                                                   EXIT();
+                                                                                                            }
+WGPUProc wgpuGetProcAddress(WGPUStringView procName) {                                                        ENTRY();
+return NULL;                                                        EXIT();
+                                                                     }
 void wgpuSupportedFeaturesFreeMembers(WGPUSupportedFeatures value) {
+    ENTRY();
     if(value.features){
         RL_FREE((void*)value.features);
     }
+    EXIT();
 }
-void wgpuSupportedWGSLLanguageFeaturesFreeMembers(WGPUSupportedWGSLLanguageFeatures value) {}
-void wgpuSurfaceCapabilitiesFreeMembers(WGPUSurfaceCapabilities value) {}
+void wgpuSupportedWGSLLanguageFeaturesFreeMembers(WGPUSupportedWGSLLanguageFeatures value) {
+    ENTRY();
+    (void)value;
+    EXIT();
+}
+void wgpuSurfaceCapabilitiesFreeMembers(WGPUSurfaceCapabilities value) {
+    ENTRY();
+    (void)value;
+    EXIT();
+}
 
 // Stubs for missing Methods of Adapter
 void wgpuAdapterGetFeatures(WGPUAdapter adapter, WGPUSupportedFeatures* features) {
+    ENTRY();
     if (!adapter || !features) {
         if (features) {
             features->featureCount = 0;
@@ -6461,40 +6758,98 @@ void wgpuAdapterGetFeatures(WGPUAdapter adapter, WGPUSupportedFeatures* features
     features->featureCount = count;
     features->features = RL_CALLOC(count, sizeof(WGPUFeatureName));
     memcpy((void*)features->features, supported_features, count * sizeof(WGPUFeatureName));
+    EXIT();
 }
-WGPUStatus wgpuAdapterGetInfo(WGPUAdapter adapter, WGPUAdapterInfo * info) { return WGPUStatus_Error; }
-WGPUBool wgpuAdapterHasFeature(WGPUAdapter adapter, WGPUFeatureName feature) { return 0; }
+WGPUStatus wgpuAdapterGetInfo(WGPUAdapter adapter, WGPUAdapterInfo * info) {                                                                              ENTRY();
+return WGPUStatus_Error;                                                                              EXIT();
+                                                                                                       }
+WGPUBool wgpuAdapterHasFeature(WGPUAdapter adapter, WGPUFeatureName feature) {                                                                                ENTRY();
+return 0;                                                                                EXIT();
+                                                                                          }
 
 // Stubs for missing Methods of BindGroup
-void wgpuBindGroupSetLabel(WGPUBindGroup bindGroup, WGPUStringView label) {}
+void wgpuBindGroupSetLabel(WGPUBindGroup bindGroup, WGPUStringView label) {
+     ENTRY();
+
+     EXIT();
+}
 
 // Stubs for missing Methods of BindGroupLayout
-void wgpuBindGroupLayoutSetLabel(WGPUBindGroupLayout bindGroupLayout, WGPUStringView label) {}
+void wgpuBindGroupLayoutSetLabel(WGPUBindGroupLayout bindGroupLayout, WGPUStringView label) {
+     ENTRY();
+
+     EXIT();
+}
 
 // Stubs for missing Methods of Buffer
-void wgpuBufferDestroy(WGPUBuffer buffer) {}
-void const * wgpuBufferGetConstMappedRange(WGPUBuffer buffer, size_t offset, size_t size) { return NULL; }
+void wgpuBufferDestroy(WGPUBuffer buffer) {
+     ENTRY();
+
+     EXIT();
+}
+void const * wgpuBufferGetConstMappedRange(WGPUBuffer buffer, size_t offset, size_t size) {                                                                                             ENTRY();
+return NULL;                                                                                             EXIT();
+                                                                                                          }
 void * wgpuBufferGetMappedRange(WGPUBuffer buffer, size_t offset, size_t size) {
+    ENTRY();
     return (void*)((char*)buffer->mappedRange + offset);
+    EXIT();
 }
-WGPUBufferMapState wgpuBufferGetMapState(WGPUBuffer buffer) { 
+WGPUBufferMapState wgpuBufferGetMapState(WGPUBuffer buffer) {     ENTRY();
+
     return buffer->mapState;
+    EXIT();
 }
-WGPUBufferUsage wgpuBufferGetUsage(WGPUBuffer buffer) { return buffer->usage; }
-WGPUStatus wgpuBufferReadMappedRange(WGPUBuffer buffer, size_t offset, void * data, size_t size) { return WGPUStatus_Error; }
-void wgpuBufferSetLabel(WGPUBuffer buffer, WGPUStringView label) {}
-WGPUStatus wgpuBufferWriteMappedRange(WGPUBuffer buffer, size_t offset, const void* data, size_t size) { return WGPUStatus_Error; }
+WGPUBufferUsage wgpuBufferGetUsage(WGPUBuffer buffer) {                                                         ENTRY();
+return buffer->usage;                                                         EXIT();
+                                                                               }
+WGPUStatus wgpuBufferReadMappedRange(WGPUBuffer buffer, size_t offset, void * data, size_t size) {                                                                                                    ENTRY();
+return WGPUStatus_Error;                                                                                                    EXIT();
+                                                                                                                             }
+void wgpuBufferSetLabel(WGPUBuffer buffer, WGPUStringView label) {
+     ENTRY();
+
+     EXIT();
+}
+WGPUStatus wgpuBufferWriteMappedRange(WGPUBuffer buffer, size_t offset, const void* data, size_t size) {                                                                                                          ENTRY();
+return WGPUStatus_Error;                                                                                                          EXIT();
+                                                                                                                                   }
 
 // Stubs for missing Methods of CommandBuffer
-void wgpuCommandBufferSetLabel(WGPUCommandBuffer commandBuffer, WGPUStringView label) {}
-void wgpuCommandBufferAddRef(WGPUCommandBuffer commandBuffer) {}
+void wgpuCommandBufferSetLabel(WGPUCommandBuffer commandBuffer, WGPUStringView label) {
+     ENTRY();
+
+     EXIT();
+}
+void wgpuCommandBufferAddRef(WGPUCommandBuffer commandBuffer) {
+     ENTRY();
+
+     EXIT();
+}
 
 // Stubs for missing Methods of CommandEncoder
-void wgpuCommandEncoderClearBuffer(WGPUCommandEncoder commandEncoder, WGPUBuffer buffer, uint64_t offset, uint64_t size) {}
-void wgpuCommandEncoderInsertDebugMarker(WGPUCommandEncoder commandEncoder, WGPUStringView markerLabel) {}
-void wgpuCommandEncoderPopDebugGroup(WGPUCommandEncoder commandEncoder) {}
-void wgpuCommandEncoderPushDebugGroup(WGPUCommandEncoder commandEncoder, WGPUStringView groupLabel) {}
+void wgpuCommandEncoderClearBuffer(WGPUCommandEncoder commandEncoder, WGPUBuffer buffer, uint64_t offset, uint64_t size) {
+     ENTRY();
+
+     EXIT();
+}
+void wgpuCommandEncoderInsertDebugMarker(WGPUCommandEncoder commandEncoder, WGPUStringView markerLabel) {
+     ENTRY();
+
+     EXIT();
+}
+void wgpuCommandEncoderPopDebugGroup(WGPUCommandEncoder commandEncoder) {
+     ENTRY();
+
+     EXIT();
+}
+void wgpuCommandEncoderPushDebugGroup(WGPUCommandEncoder commandEncoder, WGPUStringView groupLabel) {
+     ENTRY();
+
+     EXIT();
+}
 void wgpuCommandEncoderResolveQuerySet(WGPUCommandEncoder commandEncoder, WGPUQuerySet querySet, uint32_t firstQuery, uint32_t queryCount, WGPUBuffer destination, uint64_t destinationOffset) {
+    ENTRY();
     const BufferUsageSnap usage = {
         .access = VK_ACCESS_TRANSFER_WRITE_BIT,
         .stage = VK_PIPELINE_STAGE_TRANSFER_BIT
@@ -6511,18 +6866,28 @@ void wgpuCommandEncoderResolveQuerySet(WGPUCommandEncoder commandEncoder, WGPUQu
         8,
         VK_QUERY_RESULT_WAIT_BIT | VK_QUERY_RESULT_64_BIT
     );
+    EXIT();
 }
-void wgpuCommandEncoderSetLabel(WGPUCommandEncoder commandEncoder, WGPUStringView label) {}
+void wgpuCommandEncoderSetLabel(WGPUCommandEncoder commandEncoder, WGPUStringView label) {
+     ENTRY();
+
+     EXIT();
+}
 void wgpuCommandEncoderWriteTimestamp(WGPUCommandEncoder commandEncoder, WGPUQuerySet querySet, uint32_t queryIndex) {
+    ENTRY();
     ru_trackQuerySet(&commandEncoder->resourceUsage, querySet);
     commandEncoder->device->functions.vkCmdWriteTimestamp(commandEncoder->buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, querySet->queryPool, queryIndex);
+    EXIT();
 }
 void wgpuCommandEncoderAddRef(WGPUCommandEncoder commandEncoder) {
+    ENTRY();
     ++commandEncoder->refCount;
+    EXIT();
 }
 
 // Stubs for missing Methods of ComputePassEncoder
 void wgpuComputePassEncoderDispatchWorkgroupsIndirect(WGPUComputePassEncoder computePassEncoder, WGPUBuffer indirectBuffer, uint64_t indirectOffset) {
+    ENTRY();
     RenderPassCommandGeneric insert = {
         .type = cp_command_type_dispatch_workgroups_indirect,
         .dispatchWorkgroupsIndirect = {
@@ -6531,23 +6896,53 @@ void wgpuComputePassEncoderDispatchWorkgroupsIndirect(WGPUComputePassEncoder com
         }
     };
     ComputePassEncoder_PushCommand(computePassEncoder, &insert);
+    EXIT();
 }
-void wgpuComputePassEncoderInsertDebugMarker(WGPUComputePassEncoder computePassEncoder, WGPUStringView markerLabel) {}
-void wgpuComputePassEncoderPopDebugGroup(WGPUComputePassEncoder computePassEncoder) {}
-void wgpuComputePassEncoderPushDebugGroup(WGPUComputePassEncoder computePassEncoder, WGPUStringView groupLabel) {}
-void wgpuComputePassEncoderSetLabel(WGPUComputePassEncoder computePassEncoder, WGPUStringView label) {}
-void wgpuComputePassEncoderAddRef(WGPUComputePassEncoder computePassEncoder) {}
+void wgpuComputePassEncoderInsertDebugMarker(WGPUComputePassEncoder computePassEncoder, WGPUStringView markerLabel) {
+     ENTRY();
+
+     EXIT();
+}
+void wgpuComputePassEncoderPopDebugGroup(WGPUComputePassEncoder computePassEncoder) {
+     ENTRY();
+
+     EXIT();
+}
+void wgpuComputePassEncoderPushDebugGroup(WGPUComputePassEncoder computePassEncoder, WGPUStringView groupLabel) {
+     ENTRY();
+
+     EXIT();
+}
+void wgpuComputePassEncoderSetLabel(WGPUComputePassEncoder computePassEncoder, WGPUStringView label) {
+     ENTRY();
+
+     EXIT();
+}
+void wgpuComputePassEncoderAddRef(WGPUComputePassEncoder computePassEncoder) {
+     ENTRY();
+
+     EXIT();
+}
 
 // Stubs for missing Methods of ComputePipeline
-WGPUBindGroupLayout wgpuComputePipelineGetBindGroupLayout(WGPUComputePipeline computePipeline, uint32_t groupIndex) { return NULL; }
-void wgpuComputePipelineSetLabel(WGPUComputePipeline computePipeline, WGPUStringView label) {}
+WGPUBindGroupLayout wgpuComputePipelineGetBindGroupLayout(WGPUComputePipeline computePipeline, uint32_t groupIndex) {                                                                                                                       ENTRY();
+return NULL;                                                                                                                       EXIT();
+                                                                                                                                    }
+void wgpuComputePipelineSetLabel(WGPUComputePipeline computePipeline, WGPUStringView label) {
+     ENTRY();
+
+     EXIT();
+}
 
 // Stubs for missing Methods of Device
 WGPUFuture wgpuDeviceCreateComputePipelineAsync(WGPUDevice device, WGPUComputePipelineDescriptor const * descriptor, WGPUCreateComputePipelineAsyncCallbackInfo callbackInfo) {
+    ENTRY();
 
     return (WGPUFuture){0};
+    EXIT();
 }
 WGPUQuerySet wgpuDeviceCreateQuerySet(WGPUDevice device, const WGPUQuerySetDescriptor* descriptor) {
+    ENTRY();
     WGPUQuerySet ret = RL_CALLOC(1, sizeof(WGPUQuerySetImpl));
     ret->device = device;
     ret->type = descriptor->type;
@@ -6563,50 +6958,144 @@ WGPUQuerySet wgpuDeviceCreateQuerySet(WGPUDevice device, const WGPUQuerySetDescr
         return NULL;
     }
     return ret; 
+    EXIT();
 }
-WGPUFuture wgpuDeviceCreateRenderPipelineAsync(WGPUDevice device, WGPURenderPipelineDescriptor const * descriptor, WGPUCreateRenderPipelineAsyncCallbackInfo callbackInfo) { return (WGPUFuture){0}; }
-void wgpuDeviceDestroy(WGPUDevice device) {}
-void wgpuDeviceGetFeatures(WGPUDevice device, WGPUSupportedFeatures * features) {}
-WGPUStatus wgpuDeviceGetLimits(WGPUDevice device, WGPULimits * limits) { return WGPUStatus_Error; }
-WGPUFuture wgpuDeviceGetLostFuture(WGPUDevice device) { return (WGPUFuture){0}; }
-WGPUBool wgpuDeviceHasFeature(WGPUDevice device, WGPUFeatureName feature) { return 0; }
-WGPUFuture wgpuDevicePopErrorScope(WGPUDevice device, WGPUPopErrorScopeCallbackInfo callbackInfo) { return (WGPUFuture){0}; }
-void wgpuDevicePushErrorScope(WGPUDevice device, WGPUErrorFilter filter) {}
-void wgpuDeviceSetLabel(WGPUDevice device, WGPUStringView label) {}
+WGPUFuture wgpuDeviceCreateRenderPipelineAsync(WGPUDevice device, WGPURenderPipelineDescriptor const * descriptor, WGPUCreateRenderPipelineAsyncCallbackInfo callbackInfo) {                                                                                                                                                                              ENTRY();
+return (WGPUFuture){0};                                                                                                                                                                              EXIT();
+                                                                                                                                                                                                      }
+void wgpuDeviceDestroy(WGPUDevice device) {
+     ENTRY();
+
+     EXIT();
+}
+void wgpuDeviceGetFeatures(WGPUDevice device, WGPUSupportedFeatures * features) {
+     ENTRY();
+
+     EXIT();
+}
+WGPUStatus wgpuDeviceGetLimits(WGPUDevice device, WGPULimits * limits) {                                                                          ENTRY();
+return WGPUStatus_Error;                                                                          EXIT();
+                                                                                                   }
+WGPUFuture wgpuDeviceGetLostFuture(WGPUDevice device) {                                                         ENTRY();
+return (WGPUFuture){0};                                                         EXIT();
+                                                                                 }
+WGPUBool wgpuDeviceHasFeature(WGPUDevice device, WGPUFeatureName feature) {                                                                             ENTRY();
+return 0;                                                                             EXIT();
+                                                                                       }
+WGPUFuture wgpuDevicePopErrorScope(WGPUDevice device, WGPUPopErrorScopeCallbackInfo callbackInfo) {                                                                                                     ENTRY();
+return (WGPUFuture){0};                                                                                                     EXIT();
+                                                                                                                             }
+void wgpuDevicePushErrorScope(WGPUDevice device, WGPUErrorFilter filter) {
+     ENTRY();
+
+     EXIT();
+}
+void wgpuDeviceSetLabel(WGPUDevice device, WGPUStringView label) {
+     ENTRY();
+
+     EXIT();
+}
 
 // Stubs for missing Methods of Instance
-WGPUStatus wgpuInstanceGetWGSLLanguageFeatures(WGPUInstance instance, WGPUSupportedWGSLLanguageFeatures * features) { return WGPUStatus_Error; }
-WGPUBool wgpuInstanceHasWGSLLanguageFeature(WGPUInstance instance, WGPUWGSLLanguageFeatureName feature) { return 0; }
-void wgpuInstanceProcessEvents(WGPUInstance instance) {}
+WGPUStatus wgpuInstanceGetWGSLLanguageFeatures(WGPUInstance instance, WGPUSupportedWGSLLanguageFeatures * features) {                                                                                                                       ENTRY();
+return WGPUStatus_Error;                                                                                                                       EXIT();
+                                                                                                                                                }
+WGPUBool wgpuInstanceHasWGSLLanguageFeature(WGPUInstance instance, WGPUWGSLLanguageFeatureName feature) {                                                                                                           ENTRY();
+return 0;                                                                                                           EXIT();
+                                                                                                                     }
+void wgpuInstanceProcessEvents(WGPUInstance instance) {
+     ENTRY();
+
+     EXIT();
+}
 
 // Stubs for missing Methods of PipelineLayout
-void wgpuPipelineLayoutSetLabel(WGPUPipelineLayout pipelineLayout, WGPUStringView label) {}
+void wgpuPipelineLayoutSetLabel(WGPUPipelineLayout pipelineLayout, WGPUStringView label) {
+     ENTRY();
+
+     EXIT();
+}
 
 // Stubs for missing Methods of QuerySet
-void wgpuQuerySetDestroy(WGPUQuerySet querySet) {}
-uint32_t wgpuQuerySetGetCount(WGPUQuerySet querySet) { return 0; }
-WGPUQueryType wgpuQuerySetGetType(WGPUQuerySet querySet) { return querySet->type; }
-void wgpuQuerySetSetLabel(WGPUQuerySet querySet, WGPUStringView label) {}
-void wgpuQuerySetAddRef(WGPUQuerySet querySet) {}
-void wgpuQuerySetRelease(WGPUQuerySet querySet) {}
+void wgpuQuerySetDestroy(WGPUQuerySet querySet) {
+     ENTRY();
+
+     EXIT();
+}
+uint32_t wgpuQuerySetGetCount(WGPUQuerySet querySet) {                                                        ENTRY();
+return 0;                                                        EXIT();
+                                                                  }
+WGPUQueryType wgpuQuerySetGetType(WGPUQuerySet querySet) {                                                            ENTRY();
+return querySet->type;                                                            EXIT();
+                                                                                   }
+void wgpuQuerySetSetLabel(WGPUQuerySet querySet, WGPUStringView label) {
+     ENTRY();
+
+     EXIT();
+}
+void wgpuQuerySetAddRef(WGPUQuerySet querySet) {
+     ENTRY();
+
+     EXIT();
+}
+void wgpuQuerySetRelease(WGPUQuerySet querySet) {
+     ENTRY();
+
+     EXIT();
+}
 
 // Stubs for missing Methods of Queue
-WGPUFuture wgpuQueueOnSubmittedWorkDone(WGPUQueue queue, WGPUQueueWorkDoneCallbackInfo callbackInfo) { return (WGPUFuture){0}; }
-void wgpuQueueSetLabel(WGPUQueue queue, WGPUStringView label) {}
+WGPUFuture wgpuQueueOnSubmittedWorkDone(WGPUQueue queue, WGPUQueueWorkDoneCallbackInfo callbackInfo) {                                                                                                        ENTRY();
+return (WGPUFuture){0};                                                                                                        EXIT();
+                                                                                                                                }
+void wgpuQueueSetLabel(WGPUQueue queue, WGPUStringView label) {
+     ENTRY();
+
+     EXIT();
+}
 
 // Stubs for missing Methods of RenderBundle
-void wgpuRenderBundleSetLabel(WGPURenderBundle renderBundle, WGPUStringView label) {}
-void wgpuRenderBundleAddRef(WGPURenderBundle renderBundle) {}
-void wgpuRenderBundleRelease(WGPURenderBundle renderBundle) {}
+void wgpuRenderBundleSetLabel(WGPURenderBundle renderBundle, WGPUStringView label) {
+     ENTRY();
+
+     EXIT();
+}
+void wgpuRenderBundleAddRef(WGPURenderBundle renderBundle) {
+     ENTRY();
+
+     EXIT();
+}
+void wgpuRenderBundleRelease(WGPURenderBundle renderBundle) {
+     ENTRY();
+
+     EXIT();
+}
 
 // Stubs for missing Methods of RenderBundleEncoder
-void wgpuRenderBundleEncoderInsertDebugMarker(WGPURenderBundleEncoder renderBundleEncoder, WGPUStringView markerLabel) {}
-void wgpuRenderBundleEncoderPopDebugGroup(WGPURenderBundleEncoder renderBundleEncoder) {}
-void wgpuRenderBundleEncoderPushDebugGroup(WGPURenderBundleEncoder renderBundleEncoder, WGPUStringView groupLabel) {}
-void wgpuRenderBundleEncoderSetLabel(WGPURenderBundleEncoder renderBundleEncoder, WGPUStringView label) {}
+void wgpuRenderBundleEncoderInsertDebugMarker(WGPURenderBundleEncoder renderBundleEncoder, WGPUStringView markerLabel) {
+     ENTRY();
+
+     EXIT();
+}
+void wgpuRenderBundleEncoderPopDebugGroup(WGPURenderBundleEncoder renderBundleEncoder) {
+     ENTRY();
+
+     EXIT();
+}
+void wgpuRenderBundleEncoderPushDebugGroup(WGPURenderBundleEncoder renderBundleEncoder, WGPUStringView groupLabel) {
+     ENTRY();
+
+     EXIT();
+}
+void wgpuRenderBundleEncoderSetLabel(WGPURenderBundleEncoder renderBundleEncoder, WGPUStringView label) {
+     ENTRY();
+
+     EXIT();
+}
 
 // Stubs for missing Methods of RenderPassEncoder
 void wgpuRenderPassEncoderBeginOcclusionQuery(WGPURenderPassEncoder renderPassEncoder, uint32_t queryIndex) {
+    ENTRY();
     RenderPassCommandGeneric insert = {
         .type = rp_command_type_begin_occlusion_query,
         .beginOcclusionQuery = {
@@ -6614,12 +7103,15 @@ void wgpuRenderPassEncoderBeginOcclusionQuery(WGPURenderPassEncoder renderPassEn
         }
     };
     RenderPassCommandGenericVector_push_back(&renderPassEncoder->bufferedCommands, insert);
+    EXIT();
 }
 void wgpuRenderPassEncoderEndOcclusionQuery(WGPURenderPassEncoder renderPassEncoder) {
+    ENTRY();
     RenderPassCommandGeneric insert = {
         .type = rp_command_type_end_occlusion_query
     };
     RenderPassCommandGenericVector_push_back(&renderPassEncoder->bufferedCommands, insert);
+    EXIT();
 }
 
 static inline size_t WGPUStringView_length(WGPUStringView view){
@@ -6627,6 +7119,7 @@ static inline size_t WGPUStringView_length(WGPUStringView view){
 }
 
 void wgpuRenderPassEncoderInsertDebugMarker(WGPURenderPassEncoder renderPassEncoder, WGPUStringView markerLabel) {
+    ENTRY();
     
     size_t length = WGPUStringView_length(markerLabel);
     wgvk_assert(length <= 30, "Debug marker labels can't be longer than 30 chars");
@@ -6637,9 +7130,11 @@ void wgpuRenderPassEncoderInsertDebugMarker(WGPURenderPassEncoder renderPassEnco
     memcpy(insert.insertDebugMarker.text, markerLabel.data, length);
     insert.insertDebugMarker.length = length;
     RenderPassCommandGenericVector_push_back(&renderPassEncoder->bufferedCommands, insert);
+    EXIT();
 }
 
 void wgpuRenderPassEncoderMultiDrawIndexedIndirect(WGPURenderPassEncoder renderPassEncoder, WGPUBuffer indirectBuffer, uint64_t indirectOffset, uint32_t maxDrawCount, WGPU_NULLABLE WGPUBuffer drawCountBuffer, uint64_t drawCountBufferOffset) {
+    ENTRY();
     RenderPassCommandGeneric insert = {
         .type = rp_command_type_multi_draw_indexed_indirect,
         .multiDrawIndexedIndirect = {
@@ -6651,9 +7146,11 @@ void wgpuRenderPassEncoderMultiDrawIndexedIndirect(WGPURenderPassEncoder renderP
         }
     };
     RenderPassCommandGenericVector_push_back(&renderPassEncoder->bufferedCommands, insert);
+    EXIT();
 }
 
 void wgpuRenderPassEncoderMultiDrawIndirect(WGPURenderPassEncoder renderPassEncoder, WGPUBuffer indirectBuffer, uint64_t indirectOffset, uint32_t maxDrawCount, WGPU_NULLABLE WGPUBuffer drawCountBuffer, uint64_t drawCountBufferOffset) {
+    ENTRY();
     // Assumes RenderPassCommandMultiDrawIndirect has fields for all parameters.
     RenderPassCommandGeneric insert = {
         .type = rp_command_type_multi_draw_indirect,
@@ -6666,48 +7163,92 @@ void wgpuRenderPassEncoderMultiDrawIndirect(WGPURenderPassEncoder renderPassEnco
         }
     };
     RenderPassCommandGenericVector_push_back(&renderPassEncoder->bufferedCommands, insert);
+    EXIT();
 }
 
 void wgpuRenderPassEncoderPopDebugGroup(WGPURenderPassEncoder renderPassEncoder) {
+    ENTRY();
     // Implemented as a no-op.
     (void)renderPassEncoder;
+    EXIT();
 }
 
 void wgpuRenderPassEncoderPushDebugGroup(WGPURenderPassEncoder renderPassEncoder, WGPUStringView groupLabel) {
+    ENTRY();
     // Implemented as a no-op.
     (void)renderPassEncoder;
     (void)groupLabel;
+    EXIT();
 }
 
 void wgpuRenderPassEncoderSetLabel(WGPURenderPassEncoder renderPassEncoder, WGPUStringView label) {
+    ENTRY();
     // This typically sets a debug label on the encoder object itself and is not a recorded command.
     // The WGPURenderPassEncoder struct definition is not provided, so this is a no-op.
     // An actual implementation might be: `renderPassEncoder->label = strdup(label);`
     (void)renderPassEncoder;
     (void)label;
+    EXIT();
 }
 
 void wgpuRenderPassEncoderSetStencilReference(WGPURenderPassEncoder renderPassEncoder, uint32_t reference) {
+    ENTRY();
+    RenderPassCommandSetStencilReference setStencilReference = {
+        .reference = reference
+    };
+    RenderPassCommandGeneric cmd = {
+        .type = rp_command_type_set_stencil_reference,
+        .setStencilReference = setStencilReference,
+    };
+    RenderPassEncoder_PushCommand(renderPassEncoder, &cmd);
     // This sets state on the encoder for subsequent draws. It is not a recorded command.
     // Assumes the WGPURenderPassEncoder struct has a 'stencilReference' member.
     //renderPassEncoder->stencilReference = reference;
+    EXIT();
 }
 // Stubs for missing Methods of RenderPipeline
 WGPUBindGroupLayout wgpuRenderPipelineGetBindGroupLayout(WGPURenderPipeline renderPipeline, uint32_t groupIndex) {
+    ENTRY();
     return renderPipeline->layout->bindGroupLayouts[groupIndex];
+    EXIT();
 }
-void wgpuRenderPipelineSetLabel(WGPURenderPipeline renderPipeline, WGPUStringView label) {}
+void wgpuRenderPipelineSetLabel(WGPURenderPipeline renderPipeline, WGPUStringView label) {
+    ENTRY();
+    (void)renderPipeline;
+    (void)label;
+    EXIT();
+}
 
 // Stubs for missing Methods of Sampler
-void wgpuSamplerSetLabel(WGPUSampler sampler, WGPUStringView label) {}
+void wgpuSamplerSetLabel(WGPUSampler sampler, WGPUStringView label) {
+    ENTRY();
+    (void)sampler;
+    (void)label;
+    EXIT();
+}
 
 // Stubs for missing Methods of ShaderModule
-WGPUFuture wgpuShaderModuleGetCompilationInfo(WGPUShaderModule shaderModule, WGPUCompilationInfoCallbackInfo callbackInfo) { return (WGPUFuture){0}; }
-void wgpuShaderModuleSetLabel(WGPUShaderModule shaderModule, WGPUStringView label) {}
+WGPUFuture wgpuShaderModuleGetCompilationInfo(WGPUShaderModule shaderModule, WGPUCompilationInfoCallbackInfo callbackInfo) {
+    ENTRY();
+    return (WGPUFuture){0};
+    EXIT();
+}
+void wgpuShaderModuleSetLabel(WGPUShaderModule shaderModule, WGPUStringView label) {
+    ENTRY();
+    (void)shaderModule;
+    (void)label;
+    EXIT();
+}
 
 // Stubs for missing Methods of Surface
-void wgpuSurfaceSetLabel(WGPUSurface surface, WGPUStringView label) {}
+void wgpuSurfaceSetLabel(WGPUSurface surface, WGPUStringView label) {
+    ENTRY();
+    (void)surface;
+    (void)label;
+    EXIT();
+}
 void wgpuSurfaceUnconfigure(WGPUSurface surface) {
+    ENTRY();
     WGPUDevice device = surface->device;
     device->functions.vkDeviceWaitIdle(device->device);
     uint32_t cacheIndex = surface->device->submittedFrames % framesInFlight;
@@ -6738,17 +7279,34 @@ void wgpuSurfaceUnconfigure(WGPUSurface surface) {
         device->functions.vkDestroySwapchainKHR(device->device, surface->swapchain, NULL);
         surface->swapchain = NULL;
     }
+    EXIT();
 }
 void wgpuSurfaceAddRef(WGPUSurface surface) {
+    ENTRY();
     ++surface->refCount;
+    EXIT();
 }
 
 // Stubs for missing Methods of Texture
-void wgpuTextureDestroy(WGPUTexture texture) {}
-void wgpuTextureSetLabel(WGPUTexture texture, WGPUStringView label) {}
+void wgpuTextureDestroy(WGPUTexture texture) {
+    ENTRY();
+    (void)texture;
+    EXIT();
+}
+void wgpuTextureSetLabel(WGPUTexture texture, WGPUStringView label) {
+    ENTRY();
+    (void)texture;
+    (void)label;
+    EXIT();
+}
 
 // Stubs for missing Methods of TextureView
-void wgpuTextureViewSetLabel(WGPUTextureView textureView, WGPUStringView label) {}
+void wgpuTextureViewSetLabel(WGPUTextureView textureView, WGPUStringView label) {
+    ENTRY();
+    (void)textureView;
+    (void)label;
+    EXIT();
+}
 
 
 
@@ -7657,6 +8215,7 @@ static inline VkRayTracingShaderGroupTypeKHR toVulkanShaderGroupType(WGPURayTrac
     }
 }
 static  WGPUShaderStageEnum wgpuShaderStageToEnum(WGPUShaderStage stage){
+    ENTRY();
     if(stage == WGPUShaderStage_Vertex) return WGPUShaderStageEnum_Vertex;
     if(stage == WGPUShaderStage_TessControl) return WGPUShaderStageEnum_TessControl;
     if(stage == WGPUShaderStage_TessEvaluation) return WGPUShaderStageEnum_TessEvaluation;
@@ -7672,8 +8231,10 @@ static  WGPUShaderStageEnum wgpuShaderStageToEnum(WGPUShaderStage stage){
     if(stage == WGPUShaderStage_Task) return WGPUShaderStageEnum_Task;
     if(stage == WGPUShaderStage_Mesh) return WGPUShaderStageEnum_Mesh;
     return (WGPUShaderStageEnum)~0;
+    EXIT();
 }
 WGPURayTracingShaderBindingTable wgpuDeviceCreateRayTracingShaderBindingTable(WGPUDevice device, const WGPURayTracingShaderBindingTableDescriptor* descriptor){
+    ENTRY();
     WGPURayTracingShaderBindingTable ret = RL_CALLOC(1, sizeof(WGPURayTracingShaderBindingTableImpl));
     ret->refCount = 1;
     ret->shaderGroups = RL_CALLOC(descriptor->groupCount, sizeof(VkRayTracingShaderGroupCreateInfoKHR));
@@ -7704,9 +8265,11 @@ WGPURayTracingShaderBindingTable wgpuDeviceCreateRayTracingShaderBindingTable(WG
         };
     }
     return ret;
+    EXIT();
 }
 
 WGPURaytracingPipeline wgpuDeviceCreateRayTracingPipeline(WGPUDevice device, const WGPURayTracingPipelineDescriptor* descriptor){
+    ENTRY();
     // After creating the ray tracing pipeline in wgpuDeviceCreateRayTracingPipeline:
     WGPURaytracingPipeline ret = RL_CALLOC(1, sizeof(WGPURaytracingPipelineImpl));
     ret->layout = descriptor->layout;
@@ -7763,9 +8326,11 @@ WGPURaytracingPipeline wgpuDeviceCreateRayTracingPipeline(WGPUDevice device, con
     
     RL_FREE(shaderHandles);
     return ret;
+    EXIT();
 }
 
 WGPURayTracingAccelerationContainer wgpuDeviceCreateRayTracingAccelerationContainer(WGPUDevice device, const WGPURayTracingAccelerationContainerDescriptor* descriptor){
+    ENTRY();
     WGPURayTracingAccelerationContainer ret = RL_CALLOC(1, sizeof(WGPURayTracingAccelerationContainerImpl));
     ret->level = descriptor->level;
     ret->device = device;
@@ -7938,9 +8503,11 @@ WGPURayTracingAccelerationContainer wgpuDeviceCreateRayTracingAccelerationContai
     geometryInfoVulkan.dstAccelerationStructure = ret->accelerationStructure;
     geometryInfoVulkan.geometryCount = descriptor->geometryCount;
     return ret;
+    EXIT();
 }
 
 void wgpuCommandEncoderBuildRayTracingAccelerationContainer(WGPUCommandEncoder encoder, WGPURayTracingAccelerationContainer container){
+    ENTRY();
     
     WGPUDevice device = encoder->device;
     
@@ -7991,17 +8558,23 @@ void wgpuCommandEncoderBuildRayTracingAccelerationContainer(WGPUCommandEncoder e
             (const VkAccelerationStructureBuildRangeInfoKHR**)&container->buildRangeInfos
         );
     }
+    EXIT();
 }
 
 
 void wgpuCommandEncoderCopyRayTracingAccelerationContainer(WGPUCommandEncoder encoder, WGPURayTracingAccelerationContainer source, WGPURayTracingAccelerationContainer dest){
+    ENTRY();
 
+    EXIT();
 }
 void wgpuCommandEncoderUpdateRayTracingAccelerationContainer(WGPUCommandEncoder encoder, WGPURayTracingAccelerationContainer container){
+     ENTRY();
 
+     EXIT();
 }
 
 void wgpuRaytracingPassEncoderSetPipeline     (WGPURaytracingPassEncoder rte, WGPURaytracingPipeline raytracingPipeline){
+    ENTRY();
 
     ru_trackRaytracingPipeline(&rte->resourceUsage, raytracingPipeline);
     RenderPassCommandGeneric setPipeline = {
@@ -8011,8 +8584,10 @@ void wgpuRaytracingPassEncoderSetPipeline     (WGPURaytracingPassEncoder rte, WG
         }
     };
     RaytracingPassEncoder_PushCommand(rte, &setPipeline);
+    EXIT();
 }
 void wgpuRaytracingPassEncoderSetBindGroup    (WGPURaytracingPassEncoder cpe, uint32_t groupIndex, WGPUBindGroup bindGroup, uint32_t dynamicOffsetCount, const uint32_t* dynamicOffsets){
+    ENTRY();
     RenderPassCommandSetBindGroup setBindGroup = {
         .groupIndex = groupIndex,
         .group = bindGroup,
@@ -8032,9 +8607,11 @@ void wgpuRaytracingPassEncoderSetBindGroup    (WGPURaytracingPassEncoder cpe, ui
         }
     };
     cpe->bindGroups[groupIndex] = bindGroup;
+    EXIT();
 }
 
 void wgpuRaytracingPassEncoderTraceRays       (WGPURaytracingPassEncoder cpe, uint32_t rayGenerationOffset, uint32_t rayHitOffset, uint32_t rayMissOffset, uint32_t width, uint32_t height, uint32_t depth){
+    ENTRY();
     RenderPassCommandGeneric command = {
         .type = rt_command_type_trace_rays,
         .traceRays = {
@@ -8047,6 +8624,7 @@ void wgpuRaytracingPassEncoderTraceRays       (WGPURaytracingPassEncoder cpe, ui
         }
     };
     RaytracingPassEncoder_PushCommand(cpe, &command);
+    EXIT();
 }
 
 

@@ -16,7 +16,7 @@ extern "C"{
 #define WGPU_FUNCTION_ATTRIBUTE
 #define VMA_MIN_ALIGNMENT 32
 
-#if WGVK_DISABLE_ASSERT == 1
+#if WGVK_DISABLE_ASSERT == 1234
 
     #if defined(__clang__)
         #define wgvk_assert(Condition, Message, ...) __builtin_assume(Condition)

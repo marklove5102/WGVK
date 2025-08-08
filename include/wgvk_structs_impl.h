@@ -1367,6 +1367,7 @@ typedef enum RCPassCommandType{
     rp_command_type_draw_indexed,
     rp_command_type_draw_indexed_indirect,
     rp_command_type_draw_indirect,
+    rp_command_type_set_stencil_reference,
     rp_command_type_set_blend_constant,
     rp_command_type_set_viewport,
     rp_command_type_set_scissor_rect,
@@ -1479,6 +1480,9 @@ typedef struct RenderPassCommandSetBlendConstant{
     WGPUColor color;
 }RenderPassCommandSetBlendConstant;
 
+typedef struct RenderPassCommandSetStencilReference{
+    uint32_t reference;
+}RenderPassCommandSetStencilReference;
 
 typedef struct RenderPassCommandMultiDrawIndexedIndirect {
     WGPUBuffer indirectBuffer;
@@ -1538,6 +1542,7 @@ typedef struct RenderPassCommandGeneric {
         RenderPassCommandSetScissorRect setScissorRect;
         RenderPassCommandDrawIndexedIndirect drawIndexedIndirect;
         RenderPassCommandDrawIndirect drawIndirect;
+        RenderPassCommandSetStencilReference setStencilReference;
         RenderPassCommandSetBlendConstant setBlendConstant;
         RenderPassCommandSetVertexBuffer setVertexBuffer;
         RenderPassCommandSetIndexBuffer setIndexBuffer;
@@ -3810,6 +3815,8 @@ static inline VkAccessFlags extractVkAccessFlags(const WGPUBindGroupLayoutEntry*
 }
 
 
+#define ENTRY()// (void)0// printf("Entering: %s\n", __func__)
+#define EXIT()// (void)0// printf("Exiting: %s\n", __func__)
 
 
 
