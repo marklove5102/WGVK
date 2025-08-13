@@ -1,7 +1,7 @@
 /*
  * MIT License
  * 
- * wgvk.c - A single file WebGPU implementation in C99
+ * wgvk.c - A single file WebGPU implementation in C11
  * 
  * Copyright (c) 2025 @manuel5975p
  * 
@@ -398,6 +398,106 @@ WGPUStatus wgpuAdapterGetLimits(WGPUAdapter adapter, WGPULimits* limits) WGPU_FU
 
     return WGPUStatus_Success;
     EXIT();
+}
+
+void PerframeCache_pushFenceDependencies(PerframeCache* pfcache, WGPUFence fence, WGPUCommandBufferVector* commandBuffers){
+    PendingCommandBufferMap* map = &pfcache->pendingCommandBuffers;
+
+    WGPUCommandBufferVector* insert = PendingCommandBufferMap_get(map, fence);
+    if(insert != NULL){
+        TRACELOG(WGPU_LOG_WARNING, "fence already appears in this PerframeCache's pcm");
+        for(uint32_t i = 0;i < commandBuffers->size;i++){
+            WGPUCommandBufferVector_push_back(insert, *WGPUCommandBufferVector_get(commandBuffers, i));
+            WGPUCommandBufferVector_free(commandBuffers);
+        }
+    }
+    else{
+        PendingCommandBufferMap_put(map, fence, *commandBuffers);
+    }
+}
+
+void FIFCache_init(FIFCache* fifCache, WGPUDevice device, uint32_t queueFamily){
+    fifCache->device = device;
+    VkSemaphoreCreateInfo sci = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+    VkCommandPoolCreateInfo pci = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, NULL, 0, queueFamily};
+    for(uint32_t i = 0;i < framesInFlight;i++){
+        VkCommandPool* pool = &fifCache->frameCaches[i].commandPool;
+        VkSemaphore* fts = &fifCache->frameCaches[i].finalTransitionSemaphore;
+        VkSemaphore* ftf = &fifCache->frameCaches[i].finalTransitionSemaphore;
+        VkCommandBuffer* ftb = &fifCache->frameCaches[i].finalTransitionBuffer;
+        VkResult scres = device->functions.vkCreateSemaphore(device->device, &sci, NULL, fts);
+        VkResult cpcres = device->functions.vkCreateCommandPool(device->device, &pci, NULL, pool);
+        const VkCommandBufferAllocateInfo cbai = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .commandPool = *pool,
+            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            .commandBufferCount = 1
+        };
+        device->functions.vkAllocateCommandBuffers(device->device, &cbai, ftb);
+        fifCache->frameCaches[i].finalTransitionFence = wgpuDeviceCreateFence(device);
+        VkSemaphoreVector* semvec = &fifCache->frameCaches[i].syncState.semaphores;
+        VkSemaphoreVector_reserve(semvec, 100);
+        semvec->size = 100;
+        for(uint32_t j = 0;j < semvec->size;j++){
+            device->functions.vkCreateSemaphore(device->device, &sci, NULL, semvec->data + j);
+        }
+        device->functions.vkCreateSemaphore(device->device, &sci, NULL, &fifCache->frameCaches[i].syncState.acquireImageSemaphore);
+    }
+}
+
+void SyncState_destroy(WGPUDevice device, SyncState* syncState){
+    device->functions.vkDestroySemaphore(device->device, syncState->acquireImageSemaphore, NULL);
+    for(uint32_t s = 0;s < syncState->semaphores.size;s++){
+        device->functions.vkDestroySemaphore(device->device, syncState->semaphores.data[s], NULL);
+    }
+    VkSemaphoreVector_free(&syncState->semaphores);
+}
+
+void FIFCache_destroy(FIFCache* fcache){
+    for(uint32_t i = 0;i < framesInFlight;i++){
+        PerframeCache* cache = fcache->frameCaches + i;
+        PendingCommandBufferMap* pcm = &cache->pendingCommandBuffers;
+        for(size_t c = 0;c < pcm->current_capacity;c++){
+            PendingCommandBufferMap_kv_pair* kvp = pcm->table + c;
+            if(kvp->key != PHM_EMPTY_SLOT_KEY){
+                WGPUFence keyfence = (WGPUFence)kvp->key;
+                if(keyfence->state == WGPUFenceState_InUse){
+                    wgpuFenceWait(keyfence, ((uint64_t)1) << 28);
+                }
+                keyfence->state = WGPUFenceState_Finished;
+                wgpuFenceRelease(keyfence);
+                WGPUCommandBufferVector* value = &kvp->value;
+                for(size_t cbi = 0;cbi < value->size;cbi++){
+                    wgpuCommandBufferRelease(value->data[cbi]);
+                }
+            }
+        }
+        PendingCommandBufferMap_free(pcm);
+        //PendingCommandBufferMap_for_each(pcm, resetFenceAndReleaseBuffers, device);
+        WGPUDevice device = fcache->device;
+
+        device->functions.vkFreeCommandBuffers(device->device, cache->commandPool, 1, &cache->finalTransitionBuffer);
+        device->functions.vkDestroySemaphore(device->device, cache->finalTransitionSemaphore, NULL);
+        SyncState_destroy(fcache->device, &fcache->frameCaches[i].syncState);
+        wgpuFenceRelease(cache->finalTransitionFence);
+        
+        if(cache->commandBuffers.size){
+            device->functions.vkFreeCommandBuffers(device->device, cache->commandPool, cache->commandBuffers.size, cache->commandBuffers.data);
+            VkCommandBufferVector_free(&cache->commandBuffers);
+        }
+        for(size_t bgc = 0;bgc < cache->bindGroupCache.current_capacity;bgc++){
+            if(cache->bindGroupCache.table[bgc].key != PHM_EMPTY_SLOT_KEY && cache->bindGroupCache.table[bgc].key != PHM_DELETED_SLOT_KEY){
+                DescriptorSetAndPoolVector* dspv = &cache->bindGroupCache.table[bgc].value;
+                for(size_t vi = 0;vi < dspv->size;vi++){
+                    //device->functions.vkFreeDescriptorSets(device->device, dspv->data[i].pool, 1, &dspv->data[i].set);
+                    device->functions.vkDestroyDescriptorPool(device->device, dspv->data[i].pool, NULL);
+                }
+                DescriptorSetAndPoolVector_free(dspv);
+            }
+        }
+        BindGroupCacheMap_free(&cache->bindGroupCache);
+        device->functions.vkDestroyCommandPool(device->device, cache->commandPool, NULL);
+    }
 }
 
 static RenderPassLayout GetRenderPassLayout2(const RenderPassCommandBegin* rpdesc){
@@ -3963,6 +4063,7 @@ void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuff
         //auto it = queue->pendingCommandBuffers[frameCount % framesInFlight].find(fence);
         if(fence_iterator == NULL){
             WGPUCommandBufferVector insert;
+            WGPUCommandBufferVector_init(&insert);
             PendingCommandBufferMap_put(pcm, (void*)fence, insert);
             fence_iterator = PendingCommandBufferMap_get(pcm, (void*)fence);
             PendingCommandBufferListRef* ud = RL_CALLOC(1, sizeof(PendingCommandBufferListRef));
@@ -4439,57 +4540,9 @@ void wgpuDeviceRelease(WGPUDevice device){
         WGPUCommandBuffer cBuffer = wgpuCommandEncoderFinish(device->queue->presubmitCache, NULL);
         wgpuCommandEncoderRelease(device->queue->presubmitCache);
         wgpuCommandBufferRelease(cBuffer);
-
+        FIFCache_destroy(&device->fifCache);
         {  // Destroy PerframeCaches
-            for(uint32_t i = 0;i < framesInFlight;i++){
-                PerframeCache* cache = DeviceGetFIFCache(device, i);
-                PendingCommandBufferMap* pcm = &cache->pendingCommandBuffers;
-                for(size_t c = 0;c < pcm->current_capacity;c++){
-                    PendingCommandBufferMap_kv_pair* kvp = pcm->table + c;
-
-                    if(kvp->key != PHM_EMPTY_SLOT_KEY){
-                        WGPUFence keyfence = kvp->key;
-                        if(keyfence->state == WGPUFenceState_InUse){
-                            wgpuFenceWait(keyfence, ((uint64_t)1) << 28);
-                        }
-                        keyfence->state = WGPUFenceState_Finished;
-                        wgpuFenceRelease(keyfence);
-                        WGPUCommandBufferVector* value = &kvp->value;
-                        for(size_t cbi = 0;cbi < value->size;cbi++){
-                            wgpuCommandBufferRelease(value->data[cbi]);
-                        }
-                    }
-                }
-                PendingCommandBufferMap_free(pcm);
-                //PendingCommandBufferMap_for_each(pcm, resetFenceAndReleaseBuffers, device);  
-                device->functions.vkFreeCommandBuffers(device->device, cache->commandPool, 1, &cache->finalTransitionBuffer);
-                device->functions.vkDestroySemaphore(device->device, cache->finalTransitionSemaphore, NULL);
-
-
-                device->functions.vkDestroySemaphore(device->device, device->queue->syncState[i].acquireImageSemaphore, NULL);
-                for(uint32_t s = 0;s < device->queue->syncState[i].semaphores.size;s++){
-                    device->functions.vkDestroySemaphore(device->device, device->queue->syncState[i].semaphores.data[s], NULL);
-                }
-                VkSemaphoreVector_free(&device->queue->syncState[i].semaphores);
-                wgpuFenceRelease(cache->finalTransitionFence);
-                
-                if(cache->commandBuffers.size){
-                    device->functions.vkFreeCommandBuffers(device->device, cache->commandPool, cache->commandBuffers.size, cache->commandBuffers.data);
-                    VkCommandBufferVector_free(&cache->commandBuffers);
-                }
-                for(size_t bgc = 0;bgc < cache->bindGroupCache.current_capacity;bgc++){
-                    if(cache->bindGroupCache.table[bgc].key != PHM_EMPTY_SLOT_KEY && cache->bindGroupCache.table[bgc].key != PHM_DELETED_SLOT_KEY){
-                        DescriptorSetAndPoolVector* dspv = &cache->bindGroupCache.table[bgc].value;
-                        for(size_t vi = 0;vi < dspv->size;vi++){
-                            //device->functions.vkFreeDescriptorSets(device->device, dspv->data[i].pool, 1, &dspv->data[i].set); 
-                            device->functions.vkDestroyDescriptorPool(device->device, dspv->data[i].pool, NULL); 
-                        }
-                        DescriptorSetAndPoolVector_free(dspv);
-                    }
-                }
-                BindGroupCacheMap_free(&cache->bindGroupCache);
-                device->functions.vkDestroyCommandPool(device->device, cache->commandPool, NULL);
-            }
+            
             FenceCache_Destroy(&device->fenceCache);
             #if USE_VMA_ALLOCATOR == 1
             vmaDestroyPool(device->allocator, device->aligned_hostVisiblePool);
@@ -4919,12 +4972,13 @@ void wgpuBindGroupLayoutRelease(WGPUBindGroupLayout bglayout){
     if(bglayout->refCount == 0){
         WGPUDevice device = bglayout->device;
         for(uint32_t i = 0;i < framesInFlight;i++){
-            DescriptorSetAndPoolVector* dspVector = BindGroupCacheMap_get(&bglayout->device->frameCaches[i].bindGroupCache, bglayout);
+            PerframeCache* fci = DeviceGetFIFCache(bglayout->device, i);
+            DescriptorSetAndPoolVector* dspVector = BindGroupCacheMap_get(&fci->bindGroupCache, bglayout);
             if(dspVector){
                 for(size_t i = 0;i < dspVector->size;i++){
                     device->functions.vkDestroyDescriptorPool(device->device, dspVector->data[i].pool, NULL);
                 }
-                BindGroupCacheMap_erase(&bglayout->device->frameCaches[i].bindGroupCache, bglayout);
+                BindGroupCacheMap_erase(&fci->bindGroupCache, bglayout);
             }
         }
         device->functions.vkDestroyDescriptorSetLayout(bglayout->device->device, bglayout->layout, NULL);
@@ -5295,10 +5349,6 @@ void wgpuRenderPassEncoderSetBindGroup(WGPURenderPassEncoder rpe, uint32_t group
         }
     }
     ru_trackBindGroup(&rpe->resourceUsage, group);
-    return;
-    error:
-    abort();
-    
     EXIT();
 }
 
@@ -5449,17 +5499,18 @@ void wgpuSurfaceGetCurrentTexture(WGPUSurface surface, WGPUSurfaceTexture* surfa
     ENTRY();
     const size_t submittedframes = surface->device->submittedFrames;
     const uint32_t cacheIndex = surface->device->submittedFrames % framesInFlight;
+    SyncState* syncState = DeviceGetSyncState(surface->device, cacheIndex);
     if(surface->swapchain){
         VkResult acquireResult = surface->device->functions.vkAcquireNextImageKHR(
             surface->device->device,
             surface->swapchain,
             UINT32_MAX,
-            surface->device->queue->syncState[cacheIndex].acquireImageSemaphore,
+            syncState->acquireImageSemaphore,
             VK_NULL_HANDLE,
             &surface->activeImageIndex
         );
         if(acquireResult == VK_SUCCESS || acquireResult == VK_SUBOPTIMAL_KHR){
-            surface->device->queue->syncState[cacheIndex].acquireImageSemaphoreSignalled = true;
+            syncState->acquireImageSemaphoreSignalled = true;
         }
         switch(acquireResult){
             case VK_SUBOPTIMAL_KHR:
@@ -5492,8 +5543,10 @@ void wgpuSurfacePresent(WGPUSurface surface){
     ENTRY();
     WGPUDevice device = surface->device;
     uint32_t cacheIndex = surface->device->submittedFrames % framesInFlight;
-
-    VkCommandBuffer transitionBuffer = surface->device->frameCaches[cacheIndex].finalTransitionBuffer;
+    PerframeCache* frameCache = DeviceGetFIFCache(surface->device, cacheIndex);
+    PendingCommandBufferMap* pcm = &frameCache->pendingCommandBuffers;
+    SyncState* syncState = &frameCache->syncState;
+    VkCommandBuffer transitionBuffer = frameCache->finalTransitionBuffer;
     
     VkCommandBufferBeginInfo transitionBufferBeginInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -5538,23 +5591,23 @@ void wgpuSurfacePresent(WGPUSurface surface){
         .signalSemaphoreCount = 1,
         .waitSemaphoreCount = 1,
         .pWaitDstStageMask = &wsmask,
-        .pWaitSemaphores = &surface->device->queue->syncState[cacheIndex].semaphores.data[surface->device->queue->syncState[cacheIndex].submits],
+        .pWaitSemaphores = &syncState->semaphores.data[syncState->submits],
         .pSignalSemaphores = surface->presentSemaphores + surface->activeImageIndex
     };
     
-    WGPUFence finalTransitionFence = surface->device->frameCaches[cacheIndex].finalTransitionFence;
+    WGPUFence finalTransitionFence = frameCache->finalTransitionFence;
     wgpuFenceAddRef(finalTransitionFence);
     //printf("Submitting %p with fence %p\n", transitionBuffer, finalTransitionFence);
     device->functions.vkQueueSubmit(surface->device->queue->graphicsQueue, 1, &cbsinfo, finalTransitionFence->fence);
     
     finalTransitionFence->state = WGPUFenceState_InUse;
     
-    WGPUCommandBufferVector* cmdBuffers = PendingCommandBufferMap_get(&surface->device->queue->pendingCommandBuffers[cacheIndex], (void*)finalTransitionFence);
+    WGPUCommandBufferVector* cmdBuffers = PendingCommandBufferMap_get(pcm, (void*)finalTransitionFence);
     
     if(cmdBuffers == NULL){
         WGPUCommandBufferVector insert = {0};
-        PendingCommandBufferMap_put(&surface->device->queue->pendingCommandBuffers[cacheIndex], finalTransitionFence, insert);
-        cmdBuffers = PendingCommandBufferMap_get(&surface->device->queue->pendingCommandBuffers[cacheIndex], (void*)finalTransitionFence);
+        PendingCommandBufferMap_put(pcm, finalTransitionFence, insert);
+        cmdBuffers = PendingCommandBufferMap_get(pcm, (void*)finalTransitionFence);
         WGPUCommandBufferVector_init(cmdBuffers);
     }
 
@@ -5577,33 +5630,39 @@ void wgpuSurfacePresent(WGPUSurface surface){
 void wgpuDeviceTick(WGPUDevice device){
     ENTRY();
     WGPUQueue queue = device->queue;
+    
     WGPUCommandBuffer buffer = wgpuCommandEncoderFinish(queue->presubmitCache, NULL);
     wgpuCommandEncoderRelease(queue->presubmitCache);
     wgpuCommandBufferRelease(buffer);
     
     {
         const uint32_t toBeFinishedCacheIndex = device->submittedFrames % framesInFlight;
-        const VkPipelineStageFlags waitmask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-        const uint32_t tsubmits = queue->syncState[toBeFinishedCacheIndex].submits;
+        PerframeCache* frameCachetbf = DeviceGetFIFCache(device, toBeFinishedCacheIndex);
+        PendingCommandBufferMap* pcmtbf = &frameCachetbf->pendingCommandBuffers;
+        SyncState* syncStatetbf = &frameCachetbf->syncState;
 
-        if(PendingCommandBufferMap_get(&queue->pendingCommandBuffers[toBeFinishedCacheIndex], device->frameCaches[toBeFinishedCacheIndex].finalTransitionFence) == NULL){
+        const VkPipelineStageFlags waitmask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+        const uint32_t tsubmits = syncStatetbf->submits;
+        WGPUCommandBufferVector* pendingForFTF = PendingCommandBufferMap_get(pcmtbf, frameCachetbf->finalTransitionFence);
+        
+        if(pendingForFTF == NULL){
             VkSubmitInfo emptySubmit = {
                 .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
                 .waitSemaphoreCount = 1,
-                .pWaitSemaphores = VkSemaphoreVector_get(&queue->syncState[toBeFinishedCacheIndex].semaphores, tsubmits),
+                .pWaitSemaphores = VkSemaphoreVector_get(&syncStatetbf->semaphores, tsubmits),
                 .pWaitDstStageMask = &waitmask
             };
-            device->functions.vkQueueSubmit(device->queue->graphicsQueue, 1, &emptySubmit, device->frameCaches[toBeFinishedCacheIndex].finalTransitionFence->fence);
-            wgpuFenceAddRef(queue->device->frameCaches[toBeFinishedCacheIndex].finalTransitionFence);
-            queue->device->frameCaches[toBeFinishedCacheIndex].finalTransitionFence->state = WGPUFenceState_InUse;
+            device->functions.vkQueueSubmit(device->queue->graphicsQueue, 1, &emptySubmit, frameCachetbf->finalTransitionFence->fence);
+            wgpuFenceAddRef(frameCachetbf->finalTransitionFence);
+            frameCachetbf->finalTransitionFence->state = WGPUFenceState_InUse;
             WGPUCommandBufferVector insert;
             WGPUCommandBufferVector_init(&insert);
-            PendingCommandBufferMap* pcmap = &queue->pendingCommandBuffers[toBeFinishedCacheIndex];
-            WGPUFence ftf = device->frameCaches[toBeFinishedCacheIndex].finalTransitionFence;
-            WGPUCommandBufferVector* inserted = PendingCommandBufferMap_get(pcmap, ftf);
+            WGPUFence ftf = frameCachetbf->finalTransitionFence;
+
+            WGPUCommandBufferVector* inserted = PendingCommandBufferMap_get(pcmtbf, ftf);
             if(inserted == NULL){
-                PendingCommandBufferMap_put(pcmap, ftf, insert);
-                inserted = PendingCommandBufferMap_get(pcmap, ftf);
+                PendingCommandBufferMap_put(pcmtbf, ftf, insert);
+                inserted = PendingCommandBufferMap_get(pcmtbf, ftf);
             }
             //WGPUCommandBufferVector_push_back(inserted, WGPUCommandBuffer value)
             //WGPUCommandBufferVector_init(inserted);
@@ -5619,14 +5678,16 @@ void wgpuDeviceTick(WGPUDevice device){
     
 
     uint32_t cacheIndex = device->submittedFrames % framesInFlight;
-    PendingCommandBufferMap* pcm = &queue->pendingCommandBuffers[cacheIndex];
-    size_t pcmSize = pcm->current_size;
+    PerframeCache* frameCacheMew = DeviceGetFIFCache(device, cacheIndex);
+    PendingCommandBufferMap* pcmNew = &frameCacheMew->pendingCommandBuffers;
+    SyncState* syncStateMew = &frameCacheMew->syncState;
+    size_t pcmSize = pcmNew->current_size;
 
     WGPUFenceVector fences;
     WGPUFenceVector_init(&fences);
 
-    if(pcm->current_size > 0){
-        PendingCommandBufferMap_for_each(pcm, pcmNonnullFlattenCallback, (void*)&fences);
+    if(pcmNew->current_size > 0){
+        PendingCommandBufferMap_for_each(pcmNew, pcmNonnullFlattenCallback, (void*)&fences);
         if(fences.size > 0){
             wgpuFencesWait(fences.data, fences.size, UINT32_MAX);
             //printf("Waiting for fences:\n");
@@ -5639,11 +5700,11 @@ void wgpuDeviceTick(WGPUDevice device){
         //TRACELOG(WGPU_LOG_INFO, "No fences!");
     }
 
-    PendingCommandBufferMap_for_each(pcm, resetFenceAndReleaseBuffers, device);    
+    PendingCommandBufferMap_for_each(pcmNew, resetFenceAndReleaseBuffers, device);    
     WGPUFenceVector_free(&fences);
 
-    WGPUBufferVector* usedBuffers = &device->frameCaches[cacheIndex].usedBatchBuffers;
-    WGPUBufferVector* unusedBuffers = &device->frameCaches[cacheIndex].unusedBatchBuffers;
+    WGPUBufferVector* usedBuffers = &frameCacheMew->usedBatchBuffers;
+    WGPUBufferVector* unusedBuffers = &frameCacheMew->unusedBatchBuffers;
     if(unusedBuffers->capacity < unusedBuffers->size + usedBuffers->size){
         size_t newcap = (unusedBuffers->size + usedBuffers->size);
         WGPUBufferVector_reserve(unusedBuffers, newcap);
@@ -5653,26 +5714,29 @@ void wgpuDeviceTick(WGPUDevice device){
     }
     unusedBuffers->size += usedBuffers->size;
     WGPUBufferVector_clear(usedBuffers);//(WGPUBufferVector *dest, const WGPUBufferVector *source)
-    VkCommandPool poolToClear = device->frameCaches[device->submittedFrames % framesInFlight].commandPool;
     
-    //device->functions.vkResetCommandPool(device->device, poolToClear, 0);
 
-    for(size_t i = 0;i < queue->pendingCommandBuffers[cacheIndex].current_capacity;i++){
-        PendingCommandBufferMap_kv_pair* entry_pair = queue->pendingCommandBuffers[cacheIndex].table + i;
+    VkCommandPool poolToClear = frameCacheMew->commandPool;
+
+    // This line is currently commented out because they cause an 
+    // issue with CommandEncoders living across wgpuDeviceTick (and wgpuSurfacePresent) calls
+    //
+    // device->functions.vkResetCommandPool(device->device, poolToClear, 0);
+
+    for(size_t i = 0;i < pcmNew->current_capacity;i++){
+        PendingCommandBufferMap_kv_pair* entry_pair = pcmNew->table + i;
         if(entry_pair->key){
             const WGPUCommandBufferVector* vector = &entry_pair->value;
             for(size_t j = 0;j < vector->size;j++){
-                device->functions.vkFreeCommandBuffers(device->device, device->frameCaches[vector->data[j]->cacheIndex].commandPool, 1, &vector->data[j]->buffer);
+                device->functions.vkFreeCommandBuffers(device->device, poolToClear, 1, &vector->data[j]->buffer);
             }
         }
     }
-    PendingCommandBufferMap_clear(&queue->pendingCommandBuffers[cacheIndex]);
-    
-    
-    
+    PendingCommandBufferMap_clear(pcmNew);
+
     WGPUCommandEncoderDescriptor cedesc zeroinit;
     device->queue->presubmitCache = wgpuDeviceCreateCommandEncoder(device, &cedesc);
-    queue->syncState[cacheIndex].submits = 0;
+    syncStateMew->submits = 0;
     EXIT();
 }
 
@@ -7319,7 +7383,9 @@ typedef struct QueueOnSubmittedWorkDoneState{
 
 WGPUFuture wgpuQueueOnSubmittedWorkDone(WGPUQueue queue, WGPUQueueWorkDoneCallbackInfo callbackInfo) {
     ENTRY();
-        wgpuFenceWait;
+    
+    //wgpuFenceWait;
+    
     EXIT();
     return (WGPUFuture){0};
 }
@@ -7525,21 +7591,24 @@ void wgpuSurfaceSetLabel(WGPUSurface surface, WGPUStringView label) {
 void wgpuSurfaceUnconfigure(WGPUSurface surface) {
     ENTRY();
     WGPUDevice device = surface->device;
-    device->functions.vkDeviceWaitIdle(device->device);
     uint32_t cacheIndex = surface->device->submittedFrames % framesInFlight;
-    if(surface->device->queue->syncState[cacheIndex].acquireImageSemaphoreSignalled){
+    PerframeCache* fcache = DeviceGetFIFCache(device, cacheIndex);
+    SyncState* syncState = DeviceGetSyncState(device, cacheIndex);
+
+    device->functions.vkDeviceWaitIdle(device->device);
+    if(syncState->acquireImageSemaphoreSignalled){
         VkPipelineStageFlags wm = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR;
         VkSubmitInfo sinfo = {
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
             .pNext = NULL,
             .pWaitDstStageMask = &wm,
-            .pWaitSemaphores = &surface->device->queue->syncState[cacheIndex].acquireImageSemaphore,
+            .pWaitSemaphores = &syncState->acquireImageSemaphore,
             .waitSemaphoreCount = 1
         };
-        device->functions.vkQueueSubmit(surface->device->queue->graphicsQueue, 1, &sinfo, surface->device->frameCaches[cacheIndex].finalTransitionFence->fence);
-        device->queue->syncState[cacheIndex].acquireImageSemaphoreSignalled = false;
-        device->functions.vkWaitForFences(surface->device->device, 1, &surface->device->frameCaches[cacheIndex].finalTransitionFence->fence, VK_TRUE, UINT64_MAX);
-        device->functions.vkResetFences(surface->device->device, 1, &surface->device->frameCaches[cacheIndex].finalTransitionFence->fence);
+        device->functions.vkQueueSubmit(surface->device->queue->graphicsQueue, 1, &sinfo, fcache->finalTransitionFence->fence);
+        syncState->acquireImageSemaphoreSignalled = false;
+        device->functions.vkWaitForFences(surface->device->device, 1, &fcache->finalTransitionFence->fence, VK_TRUE, UINT64_MAX);
+        device->functions.vkResetFences(surface->device->device, 1, &fcache->finalTransitionFence->fence);
     }
     if(surface->presentSemaphores){
         for (uint32_t i = 0; i < surface->imagecount; i++) {
@@ -8961,6 +9030,7 @@ WGPURayTracingAccelerationContainer wgpuDeviceCreateRayTracingAccelerationContai
 
     VkAccelerationStructureBuildSizesInfoKHR buildSizesInfo = {
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR,
+        0,0,0,0
     };
 
     VkAccelerationStructureBuildGeometryInfoKHR geometryInfoVulkan = {
@@ -9030,7 +9100,9 @@ void wgpuCommandEncoderBuildRayTracingAccelerationContainer(WGPUCommandEncoder e
             .type = toVulkanAccelerationStructureLevel(container->level),
             .geometryCount = container->geometryCount,
             .pGeometries = container->geometries,
-            .scratchData = container->buildScratchBuffer->address
+            .scratchData = {
+                .deviceAddress = container->buildScratchBuffer->address
+            }
         };
 
         device->functions.vkCmdBuildAccelerationStructuresKHR(
@@ -9046,7 +9118,9 @@ void wgpuCommandEncoderBuildRayTracingAccelerationContainer(WGPUCommandEncoder e
             .dstAccelerationStructure = container->accelerationStructure,
             .type = toVulkanAccelerationStructureLevel(container->level),
             .pGeometries = container->geometries,
-            .scratchData = container->buildScratchBuffer->address
+            .scratchData = {
+                .deviceAddress = container->buildScratchBuffer->address
+            }
         };
 
         BufferUsageSnap inBufferSnap = {

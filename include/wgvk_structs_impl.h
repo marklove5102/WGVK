@@ -2081,50 +2081,32 @@ typedef struct WGPUDeviceImpl{
     struct VolkDeviceTable functions;
 }WGPUDeviceImpl;
 
-PerframeCache* DeviceGetFIFCache(WGPUDevice device, uint32_t cacheIndex){
+static PerframeCache* DeviceGetFIFCache(WGPUDevice device, uint32_t cacheIndex){
     wgvk_assert(cacheIndex < framesInFlight, "CacheIndex >= framesInFlight passed");
     return device->fifCache.frameCaches + cacheIndex;
 }
-SyncState* DeviceGetSyncState(WGPUDevice device, uint32_t cacheIndex){
+static SyncState* DeviceGetSyncState(WGPUDevice device, uint32_t cacheIndex){
     //wgvk_assert(cacheIndex < framesInFlight, "CacheIndex >= framesInFlight passed");
     return &DeviceGetFIFCache(device, cacheIndex)->syncState;
 }
+
+
 
 static inline void FenceCache_Init(WGPUDevice device, FenceCache* ptr){
     ptr->device = device;
     VkFenceVector_init(&ptr->cachedFences);
 }
-
-
-
-static inline void FIFCache_init(FIFCache* fifCache, WGPUDevice device, uint32_t queueFamily){
-    fifCache->device = device;
-    VkSemaphoreCreateInfo sci = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
-    VkCommandPoolCreateInfo pci = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, NULL, 0, queueFamily};
-    for(uint32_t i = 0;i < framesInFlight;i++){
-        VkCommandPool* pool = &fifCache->frameCaches[i].commandPool;
-        VkSemaphore* fts = &fifCache->frameCaches[i].finalTransitionSemaphore;
-        VkSemaphore* ftf = &fifCache->frameCaches[i].finalTransitionSemaphore;
-        VkCommandBuffer* ftb = &fifCache->frameCaches[i].finalTransitionBuffer;
-        VkResult scres = device->functions.vkCreateSemaphore(device->device, &sci, NULL, fts);
-        VkResult cpcres = device->functions.vkCreateCommandPool(device->device, &pci, NULL, pool);
-        const VkCommandBufferAllocateInfo cbai = {
-            .commandBufferCount = 1,
-            .commandPool = *pool,
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
-        };
-        device->functions.vkAllocateCommandBuffers(device->device, &cbai, ftb);
-        fifCache->frameCaches[i].finalTransitionFence = wgpuDeviceCreateFence(device);
-        VkSemaphoreVector* semvec = &fifCache->frameCaches[i].syncState.semaphores;
-        VkSemaphoreVector_reserve(semvec, 100);
-        semvec->size = 100;
-        for(uint32_t j = 0;j < semvec->size;j++){
-            device->functions.vkCreateSemaphore(device->device, &sci, NULL, semvec->data + j);
-        }
-        device->functions.vkCreateSemaphore(device->device, &sci, NULL, &fifCache->frameCaches[i].syncState.acquireImageSemaphore);
-    }
-}
+/**
+ * @brief Registers commandBuffers to depend on fence and be released when fence is waited for
+ * @details Takes ownership of the commandBuffers vector data. commandBuffers does not have to be externally freed after this
+ * @param pfcache 
+ * @param fence 
+ * @param commandBuffers 
+ */
+void PerframeCache_pushFenceDependencies(PerframeCache* pfcache, WGPUFence fence, WGPUCommandBufferVector* commandBuffers);
+void FIFCache_init(FIFCache* fifCache, WGPUDevice device, uint32_t queueFamily);
+void SyncState_destroy(WGPUDevice device, SyncState* syncState);
+void FIFCache_destroy(FIFCache* fcache);
 
 
 static inline VkFence FenceCache_GetFence(FenceCache* ptr){
