@@ -1323,19 +1323,8 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
     WGPUCommandEncoderDescriptor cedesc = {0};
 
     FenceCache_Init(retDevice, &retDevice->fenceCache);
-    for(uint32_t i = 0;i < framesInFlight;i++){
-        retDevice->frameCaches[i].finalTransitionSemaphore = CreateSemaphoreD(retDevice);
-        retDevice->functions.vkCreateCommandPool(retDevice->device, &pci, NULL, &retDevice->frameCaches[i].commandPool);
-        const VkCommandBufferAllocateInfo cbai = {
-            .commandBufferCount = 1,
-            .commandPool = retDevice->frameCaches[i].commandPool,
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
-        };
-        retDevice->functions.vkAllocateCommandBuffers(retDevice->device, &cbai, &retDevice->frameCaches[i].finalTransitionBuffer);
-        //printf("[DEBUG] ftb of fif %u is %p\n", i, retDevice->frameCaches[i].finalTransitionBuffer);
-        retDevice->frameCaches[i].finalTransitionFence = wgpuDeviceCreateFence(retDevice);
-    }
+    FIFCache_init(&retDevice->fifCache, retDevice, adapter->queueIndices.graphicsIndex);
+    
     retQueue->presubmitCache = wgpuDeviceCreateCommandEncoder(retDevice, &cedesc);
     VkDeviceSize limit = (((uint64_t)1) << 30);
 
@@ -1391,22 +1380,6 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
     #endif
     
     wgvkAllocator_init(&retDevice->builtinAllocator, adapter->physicalDevice, retDevice, &retDevice->functions);
-
-    
-    for(uint32_t i = 0;i < framesInFlight;i++){
-        VkSemaphoreVector* semvec = &retQueue->syncState[i].semaphores;
-        VkSemaphoreVector_reserve(semvec, 100);
-        semvec->size = 100;
-        for(uint32_t j = 0;j < semvec->size;j++){
-            semvec->data[j] = CreateSemaphoreD(retDevice);
-        }
-        retQueue->syncState[i].acquireImageSemaphore = CreateSemaphoreD(retDevice);
-
-        // TODO what? I don't remember
-    }
-    
-    
-
     {
 
         //auto [device, queue] = ret;
@@ -2102,7 +2075,8 @@ WGPUBindGroup wgpuDeviceCreateBindGroup(WGPUDevice device, const WGPUBindGroupDe
     ret->device = device;
     ret->cacheIndex = device->submittedFrames % framesInFlight;
 
-    PerframeCache* fcache = &device->frameCaches[ret->cacheIndex];
+    PerframeCache* fcache = DeviceGetFIFCache(device, ret->cacheIndex);
+
     DescriptorSetAndPoolVector* dsap = BindGroupCacheMap_get(&fcache->bindGroupCache, bgdesc->layout);
 
     if(dsap == NULL || dsap->size == 0){ //Cache miss
@@ -2334,14 +2308,14 @@ WGPUCommandEncoder wgpuDeviceCreateCommandEncoder(WGPUDevice device, const WGPUC
     ENTRY();
     WGPUCommandEncoder ret = RL_CALLOC(1, sizeof(WGPUCommandEncoderImpl));
     ret->cacheIndex = device->submittedFrames % framesInFlight;
-    PerframeCache* cache = &device->frameCaches[ret->cacheIndex];
+    PerframeCache* pfcache = DeviceGetFIFCache(device, ret->cacheIndex);
     ret->device = device;
     ret->movedFrom = 0;
     //vkCreateCommandPool(device->device, &pci, NULL, &cache.commandPool);
-    if(VkCommandBufferVector_empty(&device->frameCaches[ret->cacheIndex].commandBuffers)){
+    if(VkCommandBufferVector_empty(&pfcache->commandBuffers)){
         VkCommandBufferAllocateInfo bai = {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-            .commandPool = cache->commandPool,
+            .commandPool = pfcache->commandPool,
             .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
             .commandBufferCount = 1,
         };
@@ -2349,9 +2323,9 @@ WGPUCommandEncoder wgpuDeviceCreateCommandEncoder(WGPUDevice device, const WGPUC
         //printf("Allocating cb %p from pool %d\n", ret->buffer, (int)ret->cacheIndex);
     }
     else{
-        ret->buffer = device->frameCaches[ret->cacheIndex].commandBuffers.data[device->frameCaches[ret->cacheIndex].commandBuffers.size - 1];
+        ret->buffer = pfcache->commandBuffers.data[pfcache->commandBuffers.size - 1];
         //printf("Recycling cb %p from pool %d\n",  ret->buffer, (int)ret->cacheIndex);
-        VkCommandBufferVector_pop_back(&device->frameCaches[ret->cacheIndex].commandBuffers);
+        VkCommandBufferVector_pop_back(&pfcache->commandBuffers);
         //vkResetCommandBuffer(ret->buffer, 0);
     }
 
@@ -2691,7 +2665,8 @@ void wgpuRenderBundleEncoderRelease(WGPURenderBundleEncoder renderBundleEncoder)
 WGPURenderPassEncoder wgpuCommandEncoderBeginRenderPass(WGPUCommandEncoder enc, const WGPURenderPassDescriptor* rpdesc){
     ENTRY();
     WGPURenderPassEncoder ret = RL_CALLOC(1, sizeof(WGPURenderPassEncoderImpl));
-    VkCommandPool pool = enc->device->frameCaches[enc->cacheIndex].commandPool;
+    PerframeCache* frameCache = DeviceGetFIFCache(enc->device, enc->cacheIndex);
+    VkCommandPool pool = frameCache->commandPool;
 
     ++enc->encodedCommandCount;
     ret->refCount = 2; //One for WGPURenderPassEncoder the other for the command buffer
@@ -3814,7 +3789,7 @@ void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuff
     const uint64_t frameCount = queue->device->submittedFrames;
     const uint32_t cacheIndex = frameCount % framesInFlight;
 
-    PerframeCache* perFrameCache = &queue->device->frameCaches[cacheIndex];
+    PerframeCache* perFrameCache = DeviceGetFIFCache(queue->device, cacheIndex);
     
     VkResult submitResult = 0;
     WGPUCommandBufferVector interspersedBuffers;
@@ -3847,14 +3822,16 @@ void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuff
         CmdBarrierSetILVector_free(&compatibilityBarrierSets);
         VkSemaphoreVector waitSemaphores;
         VkSemaphoreVector_init(&waitSemaphores);
-        if(queue->syncState[cacheIndex].acquireImageSemaphoreSignalled){
-            VkSemaphoreVector_push_back(&waitSemaphores, queue->syncState[cacheIndex].acquireImageSemaphore);
-            queue->syncState[cacheIndex].acquireImageSemaphoreSignalled = false;
+        SyncState* syncState = DeviceGetSyncState(queue->device, cacheIndex);
+
+        if(syncState->acquireImageSemaphoreSignalled){
+            VkSemaphoreVector_push_back(&waitSemaphores, syncState->acquireImageSemaphore);
+            syncState->acquireImageSemaphoreSignalled = false;
         }
-        if(queue->syncState[cacheIndex].submits > 0){
-            VkSemaphoreVector_push_back(&waitSemaphores, queue->syncState[cacheIndex].semaphores.data[queue->syncState[cacheIndex].submits]);
+        if(syncState->submits > 0){
+            VkSemaphoreVector_push_back(&waitSemaphores, syncState->semaphores.data[syncState->submits]);
         }
-        uint32_t submits = queue->syncState[cacheIndex].submits;
+        uint32_t submits = syncState->submits;
         VkPipelineStageFlags* waitFlags = (VkPipelineStageFlags*)RL_CALLOC(waitSemaphores.size, sizeof(VkPipelineStageFlags));
         for(uint32_t i = 0;i < waitSemaphores.size;i++){
             waitFlags[i] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
@@ -3873,7 +3850,7 @@ void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuff
             .pWaitSemaphores = waitSemaphores.data,
             .pWaitDstStageMask = waitFlags,
             .signalSemaphoreCount = 1,
-            .pSignalSemaphores = queue->syncState[cacheIndex].semaphores.data + queue->syncState[cacheIndex].submits + 1,
+            .pSignalSemaphores = syncState->semaphores.data + syncState->submits + 1,
             .pCommandBuffers = finalSubmittable.data,
         };
         if(finalSubmittable.size){
@@ -3883,7 +3860,7 @@ void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuff
             //}
             //printf("with fence %p\n", fence);
         }
-        ++queue->syncState[cacheIndex].submits;
+        ++syncState->submits;
         WGPUFence submitFence = fence;
         submitResult = queue->device->functions.vkQueueSubmit(queue->graphicsQueue, 1, &submitInfo, submitFence ? submitFence->fence : VK_NULL_HANDLE);
         if(submitResult == VK_SUCCESS){
@@ -3980,15 +3957,17 @@ void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuff
             WGPUCommandBufferVector_push_back(&insert, interspersedBuffers.data[i]);
         }
         WGPUCommandBufferVector_free(&interspersedBuffers);
-        WGPUCommandBufferVector* fence_iterator = PendingCommandBufferMap_get(&(queue->pendingCommandBuffers[frameCount % framesInFlight]), (void*)fence);
+        uint32_t cacheIndex = frameCount % framesInFlight;
+        PendingCommandBufferMap* pcm = &DeviceGetFIFCache(queue->device, cacheIndex)->pendingCommandBuffers;
+        WGPUCommandBufferVector* fence_iterator = PendingCommandBufferMap_get(pcm, (void*)fence);
         //auto it = queue->pendingCommandBuffers[frameCount % framesInFlight].find(fence);
         if(fence_iterator == NULL){
             WGPUCommandBufferVector insert;
-            PendingCommandBufferMap_put(&(queue->pendingCommandBuffers[frameCount % framesInFlight]), (void*)fence, insert);
-            fence_iterator = PendingCommandBufferMap_get(&(queue->pendingCommandBuffers[frameCount % framesInFlight]), (void*)fence);
+            PendingCommandBufferMap_put(pcm, (void*)fence, insert);
+            fence_iterator = PendingCommandBufferMap_get(pcm, (void*)fence);
             PendingCommandBufferListRef* ud = RL_CALLOC(1, sizeof(PendingCommandBufferListRef));
             ud->fence = fence;
-            ud->map = &(queue->pendingCommandBuffers[frameCount % framesInFlight]);
+            ud->map = pcm;
             
             CallbackWithUserdataVector_push_back(&fence->callbacksOnWaitComplete, (CallbackWithUserdata){
                 .callback = releaseCommandBuffersDependingOnFence,
@@ -4255,7 +4234,7 @@ void wgpuCommandEncoderRelease(WGPUCommandEncoder commandEncoder) {
         }
         if(commandEncoder->buffer){
             VkCommandBufferVector_push_back(
-                &commandEncoder->device->frameCaches[commandEncoder->cacheIndex].commandBuffers,
+                &DeviceGetFIFCache(commandEncoder->device, commandEncoder->cacheIndex)->commandBuffers,
                 commandEncoder->buffer
             );
         }
@@ -4280,7 +4259,7 @@ void wgpuCommandBufferRelease(WGPUCommandBuffer commandBuffer) {
         WGPUComputePassEncoderSet_free(&commandBuffer->referencedCPs);
         WGPURaytracingPassEncoderSet_free(&commandBuffer->referencedRTs);
         
-        PerframeCache* frameCache = &commandBuffer->device->frameCaches[commandBuffer->cacheIndex];
+        PerframeCache* frameCache = DeviceGetFIFCache(commandBuffer->device, commandBuffer->cacheIndex);
         VkCommandBufferVector_push_back(&frameCache->commandBuffers, commandBuffer->buffer);
         if(commandBuffer->label.data){
             WGPUStringFree(commandBuffer->label);
@@ -4386,7 +4365,7 @@ void wgpuBindGroupRelease(WGPUBindGroup dshandle) {
     if (dshandle->refCount == 0) {
         releaseAllAndClear(&dshandle->resourceUsage);
         wgpuBindGroupLayoutRelease(dshandle->layout);
-        BindGroupCacheMap* bgcm = &dshandle->device->frameCaches[dshandle->cacheIndex].bindGroupCache;
+        BindGroupCacheMap* bgcm = &DeviceGetFIFCache(dshandle->device, dshandle->cacheIndex)->bindGroupCache;
         DescriptorSetAndPool insertValue = {
             .pool = dshandle->pool,
             .set = dshandle->set
@@ -4463,8 +4442,8 @@ void wgpuDeviceRelease(WGPUDevice device){
 
         {  // Destroy PerframeCaches
             for(uint32_t i = 0;i < framesInFlight;i++){
-                PerframeCache* cache = device->frameCaches + i;
-                PendingCommandBufferMap* pcm = device->queue->pendingCommandBuffers + i;
+                PerframeCache* cache = DeviceGetFIFCache(device, i);
+                PendingCommandBufferMap* pcm = &cache->pendingCommandBuffers;
                 for(size_t c = 0;c < pcm->current_capacity;c++){
                     PendingCommandBufferMap_kv_pair* kvp = pcm->table + c;
 

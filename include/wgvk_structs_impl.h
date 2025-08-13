@@ -13,6 +13,7 @@
 #endif
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #ifndef TERMCTL_RESET
@@ -1856,6 +1857,8 @@ typedef struct PerframeCache{
     VkCommandBuffer finalTransitionBuffer;
     VkSemaphore finalTransitionSemaphore;
     WGPUFence finalTransitionFence;
+    SyncState syncState;
+    PendingCommandBufferMap pendingCommandBuffers;
     //std::map<uint64_t, small_vector<MappableBufferMemory>> stagingBufferCache;
     //std::unordered_map<WGPUBindGroupLayout, std::vector<std::pair<VkDescriptorPool, VkDescriptorSet>>> bindGroupCache;
     BindGroupCacheMap bindGroupCache;
@@ -1932,6 +1935,7 @@ typedef struct WGPUPipelineLayoutImpl{
     uint32_t bindGroupLayoutCount;
     refcount_type refCount;
 }WGPUPipelineLayoutImpl;
+
 typedef enum AllocationType{
     AllocationTypeUndefined = 0,
     AllocationTypeVMA = 1,
@@ -2050,6 +2054,11 @@ typedef struct WGVKCapabilities{
     WGPUBool dynamicRendering;
 }WGVKCapabilities;
 
+typedef struct FIFCache{
+    WGPUDevice device;
+    PerframeCache frameCaches[framesInFlight];
+}FIFCache;
+
 typedef struct WGPUDeviceImpl{
     VkDevice device;
     refcount_type refCount;
@@ -2063,7 +2072,7 @@ typedef struct WGPUDeviceImpl{
     #endif
 
     VmaPool aligned_hostVisiblePool;
-    PerframeCache frameCaches[framesInFlight];
+    FIFCache fifCache;
     VkCommandPool secondaryCommandPool;
     RenderPassCache renderPassCache;
     WGPUUncapturedErrorCallbackInfo uncapturedErrorCallbackInfo;
@@ -2072,10 +2081,52 @@ typedef struct WGPUDeviceImpl{
     struct VolkDeviceTable functions;
 }WGPUDeviceImpl;
 
+PerframeCache* DeviceGetFIFCache(WGPUDevice device, uint32_t cacheIndex){
+    wgvk_assert(cacheIndex < framesInFlight, "CacheIndex >= framesInFlight passed");
+    return device->fifCache.frameCaches + cacheIndex;
+}
+SyncState* DeviceGetSyncState(WGPUDevice device, uint32_t cacheIndex){
+    //wgvk_assert(cacheIndex < framesInFlight, "CacheIndex >= framesInFlight passed");
+    return &DeviceGetFIFCache(device, cacheIndex)->syncState;
+}
+
 static inline void FenceCache_Init(WGPUDevice device, FenceCache* ptr){
     ptr->device = device;
     VkFenceVector_init(&ptr->cachedFences);
 }
+
+
+
+static inline void FIFCache_init(FIFCache* fifCache, WGPUDevice device, uint32_t queueFamily){
+    fifCache->device = device;
+    VkSemaphoreCreateInfo sci = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+    VkCommandPoolCreateInfo pci = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, NULL, 0, queueFamily};
+    for(uint32_t i = 0;i < framesInFlight;i++){
+        VkCommandPool* pool = &fifCache->frameCaches[i].commandPool;
+        VkSemaphore* fts = &fifCache->frameCaches[i].finalTransitionSemaphore;
+        VkSemaphore* ftf = &fifCache->frameCaches[i].finalTransitionSemaphore;
+        VkCommandBuffer* ftb = &fifCache->frameCaches[i].finalTransitionBuffer;
+        VkResult scres = device->functions.vkCreateSemaphore(device->device, &sci, NULL, fts);
+        VkResult cpcres = device->functions.vkCreateCommandPool(device->device, &pci, NULL, pool);
+        const VkCommandBufferAllocateInfo cbai = {
+            .commandBufferCount = 1,
+            .commandPool = *pool,
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
+        };
+        device->functions.vkAllocateCommandBuffers(device->device, &cbai, ftb);
+        fifCache->frameCaches[i].finalTransitionFence = wgpuDeviceCreateFence(device);
+        VkSemaphoreVector* semvec = &fifCache->frameCaches[i].syncState.semaphores;
+        VkSemaphoreVector_reserve(semvec, 100);
+        semvec->size = 100;
+        for(uint32_t j = 0;j < semvec->size;j++){
+            device->functions.vkCreateSemaphore(device->device, &sci, NULL, semvec->data + j);
+        }
+        device->functions.vkCreateSemaphore(device->device, &sci, NULL, &fifCache->frameCaches[i].syncState.acquireImageSemaphore);
+    }
+}
+
+
 static inline VkFence FenceCache_GetFence(FenceCache* ptr){
     if(ptr->cachedFences.size == 0){
         VkFence ret = NULL;
@@ -2110,13 +2161,13 @@ static inline void FenceCache_Destroy(FenceCache* ptr){
     VkFenceVector_free(&ptr->cachedFences);
 }
 typedef uint8_t SlimComponentSwizzle;
-const static SlimComponentSwizzle SLIM_COMPONENT_SWIZZLE_IDENTITY = VK_COMPONENT_SWIZZLE_IDENTITY;
-const static SlimComponentSwizzle SLIM_COMPONENT_SWIZZLE_ZERO = VK_COMPONENT_SWIZZLE_ZERO;
-const static SlimComponentSwizzle SLIM_COMPONENT_SWIZZLE_ONE = VK_COMPONENT_SWIZZLE_ONE;
-const static SlimComponentSwizzle SLIM_COMPONENT_SWIZZLE_R = VK_COMPONENT_SWIZZLE_R;
-const static SlimComponentSwizzle SLIM_COMPONENT_SWIZZLE_G = VK_COMPONENT_SWIZZLE_G;
-const static SlimComponentSwizzle SLIM_COMPONENT_SWIZZLE_B = VK_COMPONENT_SWIZZLE_B;
-const static SlimComponentSwizzle SLIM_COMPONENT_SWIZZLE_A = VK_COMPONENT_SWIZZLE_A;
+#define SLIM_COMPONENT_SWIZZLE_IDENTITY ((SlimComponentSwizzle)VK_COMPONENT_SWIZZLE_IDENTITY)
+#define SLIM_COMPONENT_SWIZZLE_ZERO ((SlimComponentSwizzle)VK_COMPONENT_SWIZZLE_ZERO)
+#define SLIM_COMPONENT_SWIZZLE_ONE ((SlimComponentSwizzle)VK_COMPONENT_SWIZZLE_ONE)
+#define SLIM_COMPONENT_SWIZZLE_R ((SlimComponentSwizzle)VK_COMPONENT_SWIZZLE_R)
+#define SLIM_COMPONENT_SWIZZLE_G ((SlimComponentSwizzle)VK_COMPONENT_SWIZZLE_G)
+#define SLIM_COMPONENT_SWIZZLE_B ((SlimComponentSwizzle)VK_COMPONENT_SWIZZLE_B)
+#define SLIM_COMPONENT_SWIZZLE_A ((SlimComponentSwizzle)VK_COMPONENT_SWIZZLE_A)
 
 typedef struct SlimComponentMapping{
     SlimComponentSwizzle r;
@@ -2450,12 +2501,12 @@ typedef struct WGPUQueueImpl{
     VkQueue presentQueue;
     refcount_type refCount;
 
-    SyncState syncState[framesInFlight];
+    
     WGPUDevice device;
 
     WGPUCommandEncoder presubmitCache;
 
-    PendingCommandBufferMap pendingCommandBuffers[framesInFlight];
+    
 }WGPUQueueImpl;
 
 
