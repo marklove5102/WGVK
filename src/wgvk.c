@@ -7995,34 +7995,128 @@ RGAPI void wgvkAllocator_free(const wgvkAllocation* allocation) {
 
 #if defined(WGVK_OS_WINDOWS)
 
-typedef struct { wgvk_thread_func_t f; void* arg; } wgvk_thread_tramp_t;
-static DWORD WINAPI wgvk_thread_trampoline(LPVOID arg) {
-    wgvk_thread_tramp_t t = *(wgvk_thread_tramp_t*)arg;
-    free(arg);
-    void* r = t.f(t.arg);
-    return (DWORD)(uintptr_t)r;
+typedef struct win32_thread_entry_t{
+    HANDLE handle;
+    void* return_value;
+    int in_use;
+} win32_thread_entry_t;
+
+typedef struct win32_thread_data_t{
+    wgvk_thread_func_t func;
+    void* arg;
+    HANDLE thread_handle;
+} win32_thread_data_t;
+
+
+DEFINE_PTR_HASH_MAP_ERASABLE(static inline, Win32ThreadHandleRegistry, win32_thread_entry_t)
+
+static Win32ThreadHandleRegistry global_win32_thread_registry;
+static CRITICAL_SECTION registry_lock;
+static int win32thread_registry_initialized = 0;
+
+static void store_return_value(HANDLE handle, void* retval) {
+    wgvk_assert(win32thread_registry_initialized, "Thread registry not initialized");
+
+    EnterCriticalSection(&registry_lock);
+    
+    win32_thread_entry_t* entry_for_handle = Win32ThreadHandleRegistry_get(&global_win32_thread_registry, (void*)handle);
+    wgvk_assert(entry_for_handle != NULL, "Thread handle nonexistent in global_win32_thread_registry");
+    if(entry_for_handle){
+        entry_for_handle->return_value = retval;
+    }
+    
+    LeaveCriticalSection(&registry_lock);
 }
 
-int wgvk_thread_create(wgvk_thread_t* thread, wgvk_thread_func_t func, void* arg) {
-    if (!thread || !func) { errno = EINVAL; return -1; }
-    wgvk_thread_tramp_t* t = malloc(sizeof(*t));
-    if (!t) { errno = ENOMEM; return -1; }
-    t->f = func; t->arg = arg;
-    thread->handle = CreateThread(NULL, 0, wgvk_thread_trampoline, t, 0, NULL);
-    if (!thread->handle) { free(t); return -1; }
+static void init_registry(void) {
+    if (!win32thread_registry_initialized) {
+        InitializeCriticalSection(&registry_lock);
+        Win32ThreadHandleRegistry_init(&global_win32_thread_registry);
+        win32thread_registry_initialized = 1;
+    }
+}
+
+
+static int register_thread(HANDLE handle) {
+    init_registry();
+    EnterCriticalSection(&registry_lock);
+    
+    win32_thread_entry_t value = {
+        .handle = handle,
+        .return_value = NULL,
+        .in_use = 1,
+    };
+    Win32ThreadHandleRegistry_put(&global_win32_thread_registry, handle, value);
+    
+    LeaveCriticalSection(&registry_lock);
+    return -1;  // Registry full
+}
+
+static DWORD WINAPI wgvk_thread_trampoline(LPVOID arg) {
+
+    win32_thread_data_t* data = (win32_thread_data_t*)arg;
+    void* retval = data->func(data->arg);
+    
+    store_return_value(data->thread_handle, retval);
+    free(data);
     return 0;
 }
 
-int wgvk_thread_join(wgvk_thread_t* thread, void** result) {
-    if (!thread || !thread->handle) { errno = EINVAL; return -1; }
-    if (WaitForSingleObject(thread->handle, INFINITE) != WAIT_OBJECT_0) return -1;
-    if (result) {
-        DWORD code;
-        if (!GetExitCodeThread(thread->handle, &code)) return -1;
-        *result = (void*)(uintptr_t)code;
+int wgvk_thread_create(wgvk_thread_t* thread, wgvk_thread_func_t func, void* arg) {
+    
+    win32_thread_data_t* data = malloc(sizeof(win32_thread_data_t));
+    if (!data) return -1;
+    
+    data->func = func;
+    data->arg = arg;
+    
+    HANDLE handle = CreateThread(NULL, 0, wgvk_thread_trampoline, data, CREATE_SUSPENDED, NULL);
+    if (!handle) {
+        free(data);
+        return -1;
     }
-    CloseHandle(thread->handle);
-    thread->handle = NULL;
+    
+    data->thread_handle = handle;
+    
+    if (register_thread(handle) < 0) {
+        TerminateThread(handle, 0);
+        CloseHandle(handle);
+        free(data);
+        return -1;
+    }
+    
+    ResumeThread(handle);  // Start the thread
+    thread->handle = handle;
+    return 0;
+}
+
+static void* get_return_value(HANDLE handle) {
+    wgvk_assert(win32thread_registry_initialized, "Thread registry not initialized");
+    void* retval = NULL;
+    
+    EnterCriticalSection(&registry_lock);
+    win32_thread_entry_t* entry_for_handle = Win32ThreadHandleRegistry_get(&global_win32_thread_registry, handle);
+    wgvk_assert(entry_for_handle != NULL, "Thread handle nonexistent in global_win32_thread_registry");
+    
+    retval = entry_for_handle->return_value;
+    Win32ThreadHandleRegistry_erase(&global_win32_thread_registry, handle);
+    
+    LeaveCriticalSection(&registry_lock);
+    return retval;
+}
+
+int wgvk_thread_join(wgvk_thread_t* thread, void** result) {
+
+    DWORD retCode = WaitForSingleObject(thread, INFINITE);
+    if (retCode != WAIT_OBJECT_0) return -1;
+    
+    if (result) {
+        *result = get_return_value(thread);
+    } else {
+        get_return_value(thread);  // Still need to clean up registry
+    }
+    
+    CloseHandle(thread);
     return 0;
 }
 
@@ -8108,7 +8202,7 @@ wgvk_mutex_t* wgvk_mutex_create(wgvk_locktype backend) {
         atomic_flag_clear(&m->u.spin);
     }
 #else /* Windows */
-    if (backend == wgvk_backend_kernel) {
+    if (backend == wgvk_locktype_kernel) {
         /* prefer InitializeCriticalSectionAndSpinCount for better perf */
         if (!InitializeCriticalSectionAndSpinCount(&m->u.cs, 0x00000400)) {
             free(m); errno = ENOMEM; return NULL;
@@ -8132,7 +8226,7 @@ int wgvk_mutex_destroy(wgvk_mutex_t* m) {
         return 0;
     }
 #else
-    if (m->backend == wgvk_backend_kernel) {
+    if (m->backend == wgvk_locktype_kernel) {
         DeleteCriticalSection(&m->u.cs);
         free(m);
         return 0;
@@ -8156,7 +8250,7 @@ int wgvk_mutex_lock(wgvk_mutex_t* m) {
         return 0;
     }
 #else
-    if (m->backend == wgvk_backend_kernel) {
+    if (m->backend == wgvk_locktype_kernel) {
         EnterCriticalSection(&m->u.cs);
         return 0;
     } else {
@@ -8186,7 +8280,7 @@ int wgvk_mutex_try_lock(wgvk_mutex_t* m) {
         return 0;
     }
 #else /* Windows */
-    if (m->backend == wgvk_backend_kernel) {
+    if (m->backend == wgvk_locktype_kernel) {
         // TryEnterCriticalSection returns a non-zero value on success and 0 on failure.
         if (TryEnterCriticalSection(&m->u.cs)) {
             return 0; // Success
@@ -8213,7 +8307,7 @@ int wgvk_mutex_unlock(wgvk_mutex_t* m) {
         return 0;
     }
 #else
-    if (m->backend == wgvk_backend_kernel) {
+    if (m->backend == wgvk_locktype_kernel) {
         LeaveCriticalSection(&m->u.cs);
         return 0;
     } else {
@@ -8237,7 +8331,7 @@ wgvk_cond_t* wgvk_cond_create(wgvk_locktype backend) {
         if (sem_init(&c->u.s.sem, 0, 0) != 0) { free(c); return NULL; }
     }
 #else /* Windows */
-    if (backend == wgvk_backend_kernel) {
+    if (backend == wgvk_locktype_kernel) {
         InitializeConditionVariable(&c->u.cv);
     } else {
         atomic_init(&c->u.s.waiters, 0u);
@@ -8261,7 +8355,7 @@ int wgvk_cond_destroy(wgvk_cond_t* c) {
         return e;
     }
 #else
-    if (c->backend == wgvk_backend_kernel) {
+    if (c->backend == wgvk_locktype_kernel) {
         /* no destroy */
         free(c);
         return 0;
@@ -8288,7 +8382,7 @@ int wgvk_cond_wait(wgvk_cond_t* c, wgvk_mutex_t* m) {
         if (m->backend != wgvk_locktype_kernel) return EINVAL;
         return pthread_cond_wait(&c->u.pc, &m->u.pm);
 #else
-        if (m->backend != wgvk_backend_kernel) return EINVAL;
+        if (m->backend != wgvk_locktype_kernel) return EINVAL;
         BOOL ok = SleepConditionVariableCS(&c->u.cv, &m->u.cs, INFINITE);
         return ok ? 0 : -1;
 #endif

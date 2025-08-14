@@ -1832,7 +1832,8 @@ static inline void xs_update_u32(wgpuxorshiftstate* state, uint32_t x, uint32_t 
 }
 
 static size_t renderPassLayoutHash(RenderPassLayout layout){
-    wgpuxorshiftstate ret = {.x64 = 0x2545F4918F6CDD1D};
+    wgpuxorshiftstate ret;
+    ret.x64 = 0x2545F4918F6CDD1D;
     xs_update_u32(&ret, layout.depthAttachmentPresent << 6, layout.colorAttachmentCount);
     for(uint32_t i = 0;i < layout.colorAttachmentCount;i++){
         xs_update_u32(&ret, layout.colorAttachments[i].format, layout.colorAttachments[i].sampleCount);
