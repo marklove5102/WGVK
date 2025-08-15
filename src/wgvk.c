@@ -7003,16 +7003,24 @@ WGPUBindGroupLayout wgpuComputePipelineGetBindGroupLayout(WGPUComputePipeline co
 return NULL;                                                                                                                       EXIT();
                                                                                                                                     }
 void wgpuComputePipelineSetLabel(WGPUComputePipeline computePipeline, WGPUStringView label) {
-     ENTRY();
-
-     EXIT();
-}
-
-// Stubs for missing Methods of Device
-WGPUFuture wgpuDeviceCreateComputePipelineAsync(WGPUDevice device, WGPUComputePipelineDescriptor const * descriptor, WGPUCreateComputePipelineAsyncCallbackInfo callbackInfo) {
     ENTRY();
 
-    return (WGPUFuture){0};
+    EXIT();
+}
+
+typedef struct CreateComputePipelineAsyncState{
+    wgvk_thread_t thread;
+    WGPUDevice device;
+    WGPUComputePipelineDescriptor cpdesc;
+    WGPUCreateComputePipelineAsyncCallbackInfo callbackInfo;
+    Atomar(WGPURenderPipeline) renderPipeline;
+    Atomar(uint32_t) completed;
+}CreateComputePipelineAsyncState;
+
+WGPUFuture wgpuDeviceCreateComputePipelineAsync(WGPUDevice device, WGPUComputePipelineDescriptor const * descriptor, WGPUCreateComputePipelineAsyncCallbackInfo callbackInfo) {
+    ENTRY();
+    uint64_t futureID = ++device->adapter->instance->currentFutureId;
+    return (WGPUFuture){};
     EXIT();
 }
 WGPUQuerySet wgpuDeviceCreateQuerySet(WGPUDevice device, const WGPUQuerySetDescriptor* descriptor) {
@@ -7020,13 +7028,14 @@ WGPUQuerySet wgpuDeviceCreateQuerySet(WGPUDevice device, const WGPUQuerySetDescr
     WGPUQuerySet ret = RL_CALLOC(1, sizeof(WGPUQuerySetImpl));
     ret->device = device;
     ret->type = descriptor->type;
-    struct VolkDeviceTable* functions = &device->functions;
+
     VkQueryPoolCreateInfo qpci = {
         .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
         .queryType = toVulkanQueryType(descriptor->type),
         .queryCount = descriptor->count,
     };
-    VkResult qcr = functions->vkCreateQueryPool(device->device, &qpci, NULL, &ret->queryPool);
+    
+    VkResult qcr = device->functions.vkCreateQueryPool(device->device, &qpci, NULL, &ret->queryPool);
     if(qcr != VK_SUCCESS){
         RL_FREE(ret);
         return NULL;
