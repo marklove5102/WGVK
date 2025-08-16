@@ -459,7 +459,7 @@ WGPUSurface wgpuInstanceCreateSurface(WGPUInstance instance, const WGPUSurfaceDe
                 VkBool32 supported = VK_FALSE;
                 vkGetPhysicalDeviceSurfaceSupportKHR(phys, 0, surface, &supported);
                 if(supported == VK_FALSE){
-                    abort();
+                    //wgvk_assert(false, "Surface creation failed");
                 }
                 ret->surface = surface;
 

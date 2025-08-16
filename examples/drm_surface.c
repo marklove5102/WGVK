@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <wgvk.h>
 #include <external/volk.h>
 #include <stdio.h>
@@ -201,13 +202,23 @@ int main(){
         close(drmFD);
         return 1;
     }
-    drmModeConnector *conn;
+    drmModeConnector** connectors = calloc(res->count_connectors, sizeof(drmModeConnector*));
+    int nonZeroModeIndex = -1;
     for (int i = 0; i < res->count_connectors; i++) {
-        conn = drmModeGetConnector(drmFD, res->connectors[i]);
+        connectors[i] = drmModeGetConnector(drmFD, res->connectors[i]);
+        drmModeConnector* conn = connectors[i];
         if (!conn) continue;
-
-        printf("Connector %d: id=%u, type=%d, connected=%d\n", i, conn->connector_id, conn->connector_type, conn->connection);
-        drmModeFreeConnector(conn);
+        
+        printf("Connector %d: id=%u, type=%d, connected=%d, cound_modes: %d\n", i, conn->connector_id, conn->connector_type, conn->connection, conn->count_modes);
+        if(conn->count_modes > 0){
+            nonZeroModeIndex = i;
+            //break;
+        }
+        //drmModeFreeConnector(conn);
+    }
+    if(nonZeroModeIndex == -1){
+        fprintf(stderr, "No drm connector found with at least one mode");
+        exit(1);
     }
     
     
@@ -216,18 +227,18 @@ int main(){
             .sType = WGPUSType_SurfaceSourceDrmPlane
         },
         .drmFd = drmFD,
-        .connectorId = 115,
+        .connectorId = connectors[nonZeroModeIndex]->connector_id,
         .adapter = requestedAdapter,
     };
 
     WGPUSurfaceDescriptor surfDesc = {
         .nextInChain = &drmPlane.chain,
     };
-    WGPUSurface drmSurface = wgpuInstanceCreateSurface(instance, &surfDesc);
+    WGPUSurface surface = wgpuInstanceCreateSurface(instance, &surfDesc);
     //drmModeFreeConnector(conn);
     
     WGPUSurfaceCapabilities capabilities = {0};
-    wgpuSurfaceGetCapabilities(drmSurface, requestedAdapter, &capabilities);
+    wgpuSurfaceGetCapabilities(surface, requestedAdapter, &capabilities);
     WGPUTextureFormat scFormat = WGPUTextureFormat_BGRA8Unorm;
     WGPUSurfaceConfiguration surfaceConfiguration = {
         .device = device,
@@ -238,9 +249,50 @@ int main(){
         .viewFormatCount = 1,
     };
 
-    wgpuSurfaceConfigure(drmSurface, &surfaceConfiguration);
-    __builtin_dump_struct(&capabilities, printf);
+    wgpuSurfaceConfigure(surface, &surfaceConfiguration);
     
+    __builtin_dump_struct(&capabilities, printf);
+    WGPUQueue queue = wgpuDeviceGetQueue(device);
+    WGPUSurfaceTexture surfaceTexture;
+    while(true){
+        wgpuSurfaceGetCurrentTexture(surface, &surfaceTexture);
+        if(surfaceTexture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal){
+            
+        }
+        WGPUTextureView surfaceView = wgpuTextureCreateView(surfaceTexture.texture, &(const WGPUTextureViewDescriptor){
+            .baseArrayLayer = 0,
+            .arrayLayerCount = 1,
+            .baseMipLevel = 0,
+            .mipLevelCount = 1,
+            .format = WGPUTextureFormat_BGRA8Unorm,
+            .dimension = WGPUTextureViewDimension_2D,
+            .usage = WGPUTextureUsage_RenderAttachment,
+            .aspect = WGPUTextureAspect_All,
+        });
+        WGPUCommandEncoder cenc = wgpuDeviceCreateCommandEncoder(device, NULL);
+        WGPURenderPassColorAttachment colorAttachment = {
+            .clearValue = (WGPUColor){0.5,0.2,0,0.5},
+            .loadOp = WGPULoadOp_Clear,
+            .storeOp = WGPUStoreOp_Store,
+            .view = surfaceView
+        };
+
+        WGPURenderPassEncoder rpenc = wgpuCommandEncoderBeginRenderPass(cenc, &(const WGPURenderPassDescriptor){
+            .colorAttachmentCount = 1,
+            .colorAttachments = &colorAttachment,
+        });
+        wgpuRenderPassEncoderEnd(rpenc);
+        WGPUCommandBuffer cbuf = wgpuCommandEncoderFinish(cenc, NULL);
+        wgpuQueueSubmit(queue, 1, &cbuf);
+        wgpuCommandEncoderRelease(cenc);
+        wgpuCommandBufferRelease(cbuf);
+        wgpuSurfacePresent(surface);
+        break;
+    }
+    sleep(1);
+
+
+
     WGPUFuture computeReflectionFuture = wgpuShaderModuleGetReflectionInfo(computeModule, reflectionCallbackInfo);
 
     WGPUFutureWaitInfo reflectionWaitInfo[1] = {
@@ -295,7 +347,7 @@ int main(){
         .usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead
     });
 
-    WGPUQueue queue = wgpuDeviceGetQueue(device);
+    
     float floatData[16] = {
         0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
     };
