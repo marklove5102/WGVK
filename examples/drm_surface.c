@@ -228,6 +228,18 @@ int main(){
     
     WGPUSurfaceCapabilities capabilities = {0};
     wgpuSurfaceGetCapabilities(drmSurface, requestedAdapter, &capabilities);
+    WGPUTextureFormat scFormat = WGPUTextureFormat_BGRA8Unorm;
+    WGPUSurfaceConfiguration surfaceConfiguration = {
+        .device = device,
+        .alphaMode = WGPUCompositeAlphaMode_Opaque,
+        .presentMode = capabilities.presentModes[0],
+        .format = scFormat,
+        .viewFormats = &scFormat,
+        .viewFormatCount = 1,
+    };
+
+    wgpuSurfaceConfigure(drmSurface, &surfaceConfiguration);
+    __builtin_dump_struct(&capabilities, printf);
     
     WGPUFuture computeReflectionFuture = wgpuShaderModuleGetReflectionInfo(computeModule, reflectionCallbackInfo);
 
