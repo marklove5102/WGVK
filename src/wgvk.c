@@ -451,7 +451,12 @@ void PerframeCache_pushFenceDependencies(PerframeCache* pfcache, WGPUFence fence
 void FIFCache_init(FIFCache* fifCache, WGPUDevice device, uint32_t queueFamily){
     fifCache->device = device;
     VkSemaphoreCreateInfo sci = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
-    VkCommandPoolCreateInfo pci = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, NULL, 0, queueFamily};
+    VkCommandPoolCreateInfo pci = { 
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+        .queueFamilyIndex = queueFamily
+    };
+
     for(uint32_t i = 0;i < framesInFlight;i++){
         VkCommandPool* pool = &fifCache->frameCaches[i].commandPool;
         VkSemaphore* fts = &fifCache->frameCaches[i].finalTransitionSemaphore;
@@ -4398,6 +4403,7 @@ void wgpuCommandEncoderRelease(WGPUCommandEncoder commandEncoder) {
 void wgpuCommandBufferRelease(WGPUCommandBuffer commandBuffer) {
     ENTRY();
     if(--commandBuffer->refCount == 0){
+        WGPUDevice device = commandBuffer->device;
         WGPURenderPassEncoderSet_for_each(&commandBuffer->referencedRPs, releaseRPSetCallback, NULL);
         WGPUComputePassEncoderSet_for_each(&commandBuffer->referencedCPs, releaseCPSetCallback, NULL);
         WGPURaytracingPassEncoderSet_for_each(&commandBuffer->referencedRTs, releaseRTSetCallback, NULL);
@@ -4411,7 +4417,8 @@ void wgpuCommandBufferRelease(WGPUCommandBuffer commandBuffer) {
         WGPURaytracingPassEncoderSet_free(&commandBuffer->referencedRTs);
         
         PerframeCache* frameCache = DeviceGetFIFCache(commandBuffer->device, commandBuffer->cacheIndex);
-        VkCommandBufferVector_push_back(&frameCache->commandBuffers, commandBuffer->buffer);
+        device->functions.vkFreeCommandBuffers(device->device, device->fifCache.frameCaches[commandBuffer->cacheIndex].commandPool, 1, &commandBuffer->buffer);
+        //VkCommandBufferVector_push_back(&frameCache->commandBuffers, commandBuffer->buffer);
         if(commandBuffer->label.data){
             WGPUStringFree(commandBuffer->label);
         }
@@ -5776,7 +5783,7 @@ void wgpuDeviceTick(WGPUDevice device){
         if(entry_pair->key){
             const WGPUCommandBufferVector* vector = &entry_pair->value;
             for(size_t j = 0;j < vector->size;j++){
-                device->functions.vkFreeCommandBuffers(device->device, poolToClear, 1, &vector->data[j]->buffer);
+                //device->functions.vkFreeCommandBuffers(device->device, poolToClear, 1, &vector->data[j]->buffer);
             }
         }
     }
