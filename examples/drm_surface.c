@@ -209,13 +209,13 @@ int main(){
         drmModeConnector* conn = connectors[i];
         if (!conn) continue;
         
-        printf("Connector %d: id=%u, type=%d, connected=%d, cound_modes: %d\n", i, conn->connector_id, conn->connector_type, conn->connection, conn->count_modes);
+        printf("Connector %d: id=%u, type=%d, connected=%d, count_modes: %d\n", i, conn->connector_id, conn->connector_type, conn->connection, conn->count_modes);
         
         if(conn->count_modes > 0){
             char modesString[8192];
             char* modesStringp = modesString;
             for(int mi = 0;mi < conn->count_modes;mi++){
-                modesStringp += snprintf(modesStringp, ((char*)modesString) + sizeof(modesString) - modesStringp, "Mode %d: %d x %d@%u, ", mi, (int)conn->modes[mi].hdisplay, (int)conn->modes[mi].vdisplay, conn->modes[mi].vrefresh);
+                modesStringp += snprintf(modesStringp, ((char*)modesString) + sizeof(modesString) - modesStringp, "   Mode[%d] %s: %d x %d@%u\n", mi, conn->modes[mi].name, (int)conn->modes[mi].hdisplay, (int)conn->modes[mi].vdisplay, conn->modes[mi].vrefresh);
             }
             nonZeroModeIndex = i;
             puts(modesString);
@@ -227,6 +227,7 @@ int main(){
         fprintf(stderr, "No drm connector found with at least one mode");
         exit(1);
     }
+    close(drmFD);
     
     
     WGPUSurfaceSourceDrmPlane drmPlane = {
@@ -236,6 +237,7 @@ int main(){
         .drmFd = drmFD,
         .connectorId = connectors[nonZeroModeIndex]->connector_id,
         .adapter = requestedAdapter,
+        .modeSelect = WGPUDrmModeSelect_ByIndex
     };
 
     WGPUSurfaceDescriptor surfDesc = {
@@ -246,21 +248,24 @@ int main(){
     
     WGPUSurfaceCapabilities capabilities = {0};
     wgpuSurfaceGetCapabilities(surface, requestedAdapter, &capabilities);
-    WGPUTextureFormat scFormat = WGPUTextureFormat_BGRA8Unorm;
+    
+    //__builtin_dump_struct(&capabilities, printf);
+    
+    WGPUTextureFormat scFormat = capabilities.formats[0];
     WGPUSurfaceConfiguration surfaceConfiguration = {
         .device = device,
         .alphaMode = WGPUCompositeAlphaMode_Opaque,
-        .presentMode = capabilities.presentModes[0],
+        .presentMode = WGPUPresentMode_Fifo,
         .format = scFormat,
         .viewFormats = &scFormat,
         .viewFormatCount = 1,
-        .width = 2560,
-        .height = 1440
+        .width = 3840,
+        .height = 2160
     };
 
     wgpuSurfaceConfigure(surface, &surfaceConfiguration);
     
-    __builtin_dump_struct(&capabilities, printf);
+    
     WGPUQueue queue = wgpuDeviceGetQueue(device);
     WGPUSurfaceTexture surfaceTexture;
     while(true){
@@ -273,7 +278,7 @@ int main(){
             .arrayLayerCount = 1,
             .baseMipLevel = 0,
             .mipLevelCount = 1,
-            .format = WGPUTextureFormat_BGRA8Unorm,
+            .format = scFormat,
             .dimension = WGPUTextureViewDimension_2D,
             .usage = WGPUTextureUsage_RenderAttachment,
             .aspect = WGPUTextureAspect_All,

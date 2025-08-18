@@ -310,12 +310,13 @@ WGPUSurface wgpuInstanceCreateSurface(WGPUInstance instance, const WGPUSurfaceDe
                     VkPhysicalDeviceDrmPropertiesEXT drmProps = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRM_PROPERTIES_EXT };
                     VkPhysicalDeviceProperties2 p2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &drmProps };
                     vkGetPhysicalDeviceProperties2(phys, &p2);
-                    __builtin_dump_struct(&drmProps, printf);
                 }
                 VkDisplayKHR display = VK_NULL_HANDLE;
                 
                 if (vkGetDrmDisplayEXT) {
-                    if (vkGetDrmDisplayEXT(phys, drm->drmFd, drm->connectorId, &display) != VK_SUCCESS) {
+                    VkResult getDrmDisplayResult = vkGetDrmDisplayEXT(phys, drm->drmFd, drm->connectorId, &display);
+                    if (getDrmDisplayResult != VK_SUCCESS) {
+
                         display = VK_NULL_HANDLE;
                     } else if (drm->acquireExclusive && vkAcquireDrmDisplayEXT) {
                         // Try to acquire exclusive control if requested
@@ -354,7 +355,7 @@ WGPUSurface wgpuInstanceCreateSurface(WGPUInstance instance, const WGPUSurfaceDe
                     /* Adjust field names if your WGPUDrmModeByGeometry differs */
                     uint32_t targetW  = drm->byGeometry.width;
                     uint32_t targetH  = drm->byGeometry.height;
-                    uint32_t targetHz = 0;// TODO: this was drm->byGeometry.refreshHz and 0 means "don't care"
+                    uint32_t targetHz = drm->byGeometry.refreshMilliHz;
                 
                     uint32_t i;
                     uint32_t best = 0;
@@ -452,16 +453,15 @@ WGPUSurface wgpuInstanceCreateSurface(WGPUInstance instance, const WGPUSurfaceDe
                 sci.globalAlpha     = 1.0f;
                 sci.alphaMode       = VK_DISPLAY_PLANE_ALPHA_OPAQUE_BIT_KHR;
                 sci.imageExtent     = modeParams.visibleRegion;
-                VkSurfaceKHR surface;
+                VkSurfaceKHR surface = NULL;
                 if (vkCreateDisplayPlaneSurfaceKHR(instance->instance, &sci, NULL, &surface) != VK_SUCCESS) {
                     wgvk_assert(false, "Surface creation failed");
                 }
                 VkBool32 supported = VK_FALSE;
                 vkGetPhysicalDeviceSurfaceSupportKHR(phys, 0, surface, &supported);
-                if(supported == VK_FALSE){
-                    //wgvk_assert(false, "Surface creation failed");
-                }
+                wgvk_assert(supported, "Created surface is not supported by physicalDevice");
                 ret->surface = surface;
+                ret->surfaceType = SurfaceImplType_DrmPlane;
 
         }break;
         #endif
