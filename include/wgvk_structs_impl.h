@@ -2054,6 +2054,8 @@ typedef struct WGVKCapabilities{
     WGPUBool raytracing;
     WGPUBool shaderDeviceAddress;
     WGPUBool dynamicRendering;
+    WGPUBool depthClipEnable;
+    WGPUBool depthClipControl;
 }WGVKCapabilities;
 
 typedef struct FIFCache{

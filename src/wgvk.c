@@ -350,9 +350,11 @@ WGPUStatus wgpuAdapterGetLimits(WGPUAdapter adapter, WGPULimits* limits) WGPU_FU
     VkPhysicalDeviceSubgroupProperties subgroupProperties = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES
     };
-    VkPhysicalDeviceProperties2KHR deviceProperties2;
-    deviceProperties2.sType      = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-    deviceProperties2.pNext      = &subgroupProperties;
+    
+    VkPhysicalDeviceProperties2KHR deviceProperties2 = {
+        .sType      = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext      = &subgroupProperties,
+    };
 
     vkGetPhysicalDeviceProperties2(adapter->physicalDevice, &deviceProperties2);
 
@@ -403,24 +405,40 @@ typedef struct FenceInFrameCacheCallbackUserdata{
     WGPUFence fence;
     PerframeCache* frameCache;
 }FenceInFrameCacheCallbackUserdata;
-void fenceFreeCallback(void* userdata_){
+
+static void fenceFreeCallback(void* userdata_){
     FenceInFrameCacheCallbackUserdata* userdata = (FenceInFrameCacheCallbackUserdata*)userdata_;
     WGPUCommandBufferVector* insert = PendingCommandBufferMap_get(&userdata->frameCache->pendingCommandBuffers, userdata->fence);
+    wgvk_assert(insert != NULL, "Fence freed but not present in FIF cache");
+
+    for(size_t i = 0;i < insert->size;i++){
+        wgpuCommandBufferRelease(insert->data[i]);
+    }
+    WGPUCommandBufferVector_clear(insert);
+    wgpuFenceRelease(userdata->fence);
 }
+
 void PerframeCache_pushFenceDependencies(PerframeCache* pfcache, WGPUFence fence, WGPUCommandBufferVector* commandBuffers){
     PendingCommandBufferMap* map = &pfcache->pendingCommandBuffers;
 
     WGPUCommandBufferVector* insert = PendingCommandBufferMap_get(map, fence);
     if(insert != NULL){
         TRACELOG(WGPU_LOG_WARNING, "fence already appears in this PerframeCache's pcm");
-        for(uint32_t i = 0;i < commandBuffers->size;i++){
+        for(size_t i = 0;i < commandBuffers->size;i++){
+            wgpuCommandBufferAddRef(*WGPUCommandBufferVector_get(commandBuffers, i));
             WGPUCommandBufferVector_push_back(insert, *WGPUCommandBufferVector_get(commandBuffers, i));
-            WGPUCommandBufferVector_free(commandBuffers);
         }
+        WGPUCommandBufferVector_free(commandBuffers);
     }
     else{
         PendingCommandBufferMap_put(map, fence, *commandBuffers);
+        for(size_t i = 0;i < commandBuffers->size;i++){
+            wgpuCommandBufferAddRef(*WGPUCommandBufferVector_get(commandBuffers, i));
+        }
+        wgpuFenceAddRef(fence);
         FenceInFrameCacheCallbackUserdata* userdata = RL_CALLOC(1, sizeof(FenceInFrameCacheCallbackUserdata));
+        userdata->fence = fence;
+        userdata->frameCache = pfcache;
         CallbackWithUserdata cwu = {
             .callback = fenceFreeCallback,
             .freeUserData = RL_FREE,
@@ -1300,6 +1318,8 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
     const char* deviceExtensionsToLookFor[] = {
         //#ifndef FORCE_HEADLESS
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+        VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME,
+        VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME,
         #if RENDERBUNDLES_AS_SECONDARY_COMMANDBUFFERS == 1
         VK_KHR_MAINTENANCE_7_EXTENSION_NAME,
         #endif
@@ -1316,11 +1336,21 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
     };
     const uint32_t deviceExtensionsToLookForCount = sizeof(deviceExtensionsToLookFor) / sizeof(const char*);
     
+    int depthClipControl_Found = 0;
+    int depthClipEnable_Found = 0;
+
     const char* deviceExtensionsFound[deviceExtensionsToLookForCount + 1];
     uint32_t extInsertIndex = 0;
     for(uint32_t i = 0;i < deviceExtensionsToLookForCount;i++){
         int deviceExtensionFound = 0;
         for(uint32_t j = 0;j < deviceExtensionCount;j++){
+            if(strcmp(deprops[j].extensionName, VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME) == 0){
+                depthClipControl_Found = 1;
+            }
+            if(strcmp(deprops[j].extensionName, VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME) == 0){
+                depthClipEnable_Found = 1;
+            }
+
             if(strcmp(deviceExtensionsToLookFor[i], deprops[j].extensionName) == 0){
                 deviceExtensionsFound[extInsertIndex++] = deviceExtensionsToLookFor[i];
                 deviceExtensionFound = 1;
@@ -1333,8 +1363,6 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
         }
         
     }
-    // Specify device features
-    
 
     VkPhysicalDeviceBufferDeviceAddressFeaturesKHR deviceFeaturesAddressKhr = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_KHR,
@@ -1387,11 +1415,12 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
     };
     
     WGPUDevice retDevice = RL_CALLOC(1, sizeof(WGPUDeviceImpl));
+
     retDevice->refCount = 1;
     WGPUQueue retQueue = RL_CALLOC(1, sizeof(WGPUQueueImpl));
     retQueue->refCount = 0;
     VkResult dcresult = vkCreateDevice(adapter->physicalDevice, &createInfo, NULL, &(retDevice->device));
-
+    
 
 
     struct VolkDeviceTable table = {0};
@@ -1401,7 +1430,8 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
     } else {
         //TRACELOG(WGPU_LOG_INFO, "Successfully created logical device");
         volkLoadDeviceTable(&retDevice->functions, retDevice->device);
-        retDevice->functions.vkQueuePresentKHR = (PFN_vkQueuePresentKHR)vkGetDeviceProcAddr(retDevice->device, "vkQueuePresentKHR");
+        retDevice->capabilities.depthClipEnable = depthClipEnable_Found;    
+        retDevice->capabilities.depthClipControl = depthClipControl_Found;    
     }
     retDevice->capabilities.dynamicRendering = v13features.dynamicRendering;
     retDevice->capabilities.raytracing = pipelineFeatures.rayTracingPipeline && accelerationStructureFeatures.accelerationStructure;
@@ -4045,7 +4075,7 @@ void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuff
             for(size_t refbEntry = 0;refbEntry < map.current_capacity;refbEntry++){
                 BufferUsageRecordMap_kv_pair* kv_pair = &map.table[refbEntry];
                 WGPUBuffer keybuffer = (WGPUBuffer)kv_pair->key;
-                if(kv_pair->key != PHM_EMPTY_SLOT_KEY && kv_pair->value.everWrittenTo != VK_FALSE && (keybuffer->usage & (WGPUBufferUsage_MapWrite | WGPUBufferUsage_MapRead))){
+                if((kv_pair->key != PHM_DELETED_SLOT_KEY && kv_pair->key != PHM_EMPTY_SLOT_KEY) && kv_pair->value.everWrittenTo != VK_FALSE && (keybuffer->usage & (WGPUBufferUsage_MapWrite | WGPUBufferUsage_MapRead))){
                     if(keybuffer->latestFence)
                         wgpuFenceRelease(keybuffer->latestFence);
                     keybuffer->latestFence = fence;
@@ -4061,42 +4091,48 @@ void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuff
         WGPUCommandBufferVector_init(&insert);
         
         WGPUCommandBufferVector_push_back(&insert, cachebuffer);
-        ++cachebuffer->refCount;
+        wgpuCommandBufferAddRef(cachebuffer);
         
+
         for(size_t i = 0;i < commandCount;i++){
             WGPUCommandBufferVector_push_back(&insert, buffers[i]);
-            ++buffers[i]->refCount;
+            //wgpuCommandBufferAddRef(buffers[i]);
         }
         for(size_t i = 0;i < interspersedBuffers.size;i++){
             WGPUCommandBufferVector_push_back(&insert, interspersedBuffers.data[i]);
         }
+
+        PerframeCache_pushFenceDependencies(perFrameCache, fence, &insert);
+
+        for(size_t i = 0;i < interspersedBuffers.size;i++){
+            wgpuCommandBufferRelease(interspersedBuffers.data[i]);
+        }
         WGPUCommandBufferVector_free(&interspersedBuffers);
         uint32_t cacheIndex = frameCount % framesInFlight;
-        PendingCommandBufferMap* pcm = &DeviceGetFIFCache(queue->device, cacheIndex)->pendingCommandBuffers;
-        WGPUCommandBufferVector* fence_iterator = PendingCommandBufferMap_get(pcm, (void*)fence);
-        //auto it = queue->pendingCommandBuffers[frameCount % framesInFlight].find(fence);
-        if(fence_iterator == NULL){
-            WGPUCommandBufferVector insert;
-            WGPUCommandBufferVector_init(&insert);
-            PendingCommandBufferMap_put(pcm, (void*)fence, insert);
-            fence_iterator = PendingCommandBufferMap_get(pcm, (void*)fence);
-            PendingCommandBufferListRef* ud = RL_CALLOC(1, sizeof(PendingCommandBufferListRef));
-            ud->fence = fence;
-            ud->map = pcm;
-            
-            CallbackWithUserdataVector_push_back(&fence->callbacksOnWaitComplete, (CallbackWithUserdata){
-                .callback = releaseCommandBuffersDependingOnFence,
-                .userdata = ud,
-                .freeUserData = free
-            });
-            wgvk_assert(fence_iterator != NULL, "Something is wrong with the hash set");
-            WGPUCommandBufferVector_init(fence_iterator);
-        }
-
-        for(size_t i = 0;i < insert.size;i++){
-            WGPUCommandBufferVector_push_back(fence_iterator, insert.data[i]);
-        }
-        WGPUCommandBufferVector_free(&insert);
+        //PendingCommandBufferMap* pcm = &DeviceGetFIFCache(queue->device, cacheIndex)->pendingCommandBuffers;
+        //WGPUCommandBufferVector* fence_iterator = PendingCommandBufferMap_get(pcm, (void*)fence);
+        ////auto it = queue->pendingCommandBuffers[frameCount % framesInFlight].find(fence);
+        //if(fence_iterator == NULL){
+        //    WGPUCommandBufferVector insert;
+        //    WGPUCommandBufferVector_init(&insert);
+        //    PendingCommandBufferMap_put(pcm, (void*)fence, insert);
+        //    fence_iterator = PendingCommandBufferMap_get(pcm, (void*)fence);
+        //    PendingCommandBufferListRef* ud = RL_CALLOC(1, sizeof(PendingCommandBufferListRef));
+        //    ud->fence = fence;
+        //    ud->map = pcm;
+        //    
+        //    CallbackWithUserdataVector_push_back(&fence->callbacksOnWaitComplete, (CallbackWithUserdata){
+        //        .callback = releaseCommandBuffersDependingOnFence,
+        //        .userdata = ud,
+        //        .freeUserData = free
+        //    });
+        //    wgvk_assert(fence_iterator != NULL, "Something is wrong with the hash set");
+        //    WGPUCommandBufferVector_init(fence_iterator);
+        //}
+        //for(size_t i = 0;i < insert.size;i++){
+        //    WGPUCommandBufferVector_push_back(fence_iterator, insert.data[i]);
+        //}
+        //WGPUCommandBufferVector_free(&insert);
     }else{
         DeviceCallback(queue->device, WGPUErrorType_Internal, STRVIEW("vkQueueSubmit failed"));
     }
@@ -4450,8 +4486,7 @@ void wgpuComputePipelineRelease(WGPUComputePipeline pipeline){
 
 void wgpuBufferRelease(WGPUBuffer buffer) {
     ENTRY();
-    --buffer->refCount;
-    if (buffer->refCount == 0) {
+    if (--buffer->refCount == 0) {
         if(buffer->latestFence){
             wgpuFenceRelease(buffer->latestFence);
             buffer->latestFence = NULL;
@@ -4476,8 +4511,7 @@ void wgpuBufferRelease(WGPUBuffer buffer) {
 
 void wgpuBindGroupRelease(WGPUBindGroup dshandle) {
     ENTRY();
-    --dshandle->refCount;
-    if (dshandle->refCount == 0) {
+    if (--dshandle->refCount == 0) {
         releaseAllAndClear(&dshandle->resourceUsage);
         wgpuBindGroupLayoutRelease(dshandle->layout);
         BindGroupCacheMap* bgcm = &DeviceGetFIFCache(dshandle->device, dshandle->cacheIndex)->bindGroupCache;
@@ -6891,26 +6925,26 @@ return WGPUStatus_Error;                                                        
 
 // Stubs for missing Methods of CommandBuffer
 void wgpuCommandBufferSetLabel(WGPUCommandBuffer commandBuffer, WGPUStringView label) {
-     ENTRY();
-
-     EXIT();
+    ENTRY();
+    
+    EXIT();
 }
 void wgpuCommandBufferAddRef(WGPUCommandBuffer commandBuffer) {
-     ENTRY();
-
-     EXIT();
+    ENTRY();
+    ++commandBuffer->refCount;
+    EXIT();
 }
 
 // Stubs for missing Methods of CommandEncoder
 void wgpuCommandEncoderClearBuffer(WGPUCommandEncoder commandEncoder, WGPUBuffer buffer, uint64_t offset, uint64_t size) {
-     ENTRY();
+    ENTRY();
 
-     EXIT();
+    EXIT();
 }
 void wgpuCommandEncoderInsertDebugMarker(WGPUCommandEncoder commandEncoder, WGPUStringView markerLabel) {
-     ENTRY();
+    ENTRY();
 
-     EXIT();
+    EXIT();
 }
 void wgpuCommandEncoderPopDebugGroup(WGPUCommandEncoder commandEncoder) {
      ENTRY();
