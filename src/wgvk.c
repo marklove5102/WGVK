@@ -2491,20 +2491,43 @@ WGPUCommandEncoder wgpuDeviceCreateCommandEncoder(WGPUDevice device, const WGPUC
     EXIT();
 }
 
+static inline VkComponentSwizzle toVkSwizzleComponent(WGPUComponentSwizzle wgpuSwizzle){
+    switch(wgpuSwizzle){
+        case WGPUComponentSwizzle_Zero: return VK_COMPONENT_SWIZZLE_ZERO;
+        case WGPUComponentSwizzle_One: return VK_COMPONENT_SWIZZLE_ONE;
+        case WGPUComponentSwizzle_R: return VK_COMPONENT_SWIZZLE_R;
+        case WGPUComponentSwizzle_G: return VK_COMPONENT_SWIZZLE_G;
+        case WGPUComponentSwizzle_B: return VK_COMPONENT_SWIZZLE_B;
+        case WGPUComponentSwizzle_A: return VK_COMPONENT_SWIZZLE_A;
+        case WGPUComponentSwizzle_Undefined:
+        case WGPUComponentSwizzle_Force32:
+        rg_unreachable();
+        wgvk_assert(False, "Invalid enum passed");
+        abort();
+    }
+}
+
 WGPUTextureView wgpuTextureCreateView(WGPUTexture texture, const WGPUTextureViewDescriptor *descriptor){
     ENTRY();
-
+    VkComponentMapping swizzle = {
+        .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+        .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+        .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+        .a = VK_COMPONENT_SWIZZLE_IDENTITY
+    };
+    if(descriptor->nextInChain && descriptor->nextInChain->sType == WGPUSType_TextureComponentSwizzleDescriptor){
+        const WGPUTextureComponentSwizzleDescriptor* swDesc = (WGPUTextureComponentSwizzleDescriptor*)descriptor->nextInChain;
+        swizzle.r = toVkSwizzleComponent(swDesc->swizzle.r);
+        swizzle.g = toVkSwizzleComponent(swDesc->swizzle.g);
+        swizzle.b = toVkSwizzleComponent(swDesc->swizzle.b);
+        swizzle.a = toVkSwizzleComponent(swDesc->swizzle.a);
+    }
     const VkImageViewCreateInfo ivci = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .pNext = NULL,
         .flags = 0,
         .image = texture->image,
-        .components = {
-            .r = VK_COMPONENT_SWIZZLE_IDENTITY, 
-            .g = VK_COMPONENT_SWIZZLE_IDENTITY, 
-            .b = VK_COMPONENT_SWIZZLE_IDENTITY, 
-            .a = VK_COMPONENT_SWIZZLE_IDENTITY
-        },
+        .components = swizzle,
         .viewType = toVulkanTextureViewDimension(descriptor->dimension),
         .format = toVulkanPixelFormat(descriptor->format),
         .subresourceRange = {

@@ -252,6 +252,7 @@ typedef enum WGPUSType {
     WGPUSType_SurfaceColorManagement = 0x0000000A,
     WGPUSType_EmscriptenSurfaceSourceCanvasHTMLSelector = 0x00040000,
     // non-standard sTypes
+    WGPUSType_TextureComponentSwizzleDescriptor = 0x00050047,
     WGPUSType_InstanceLayerSelection = 0x10000001,
     WGPUSType_BufferAllocatorSelector = 0x10000002,
     WGPUSType_ShaderSourceGLSL = 0x10000003,
@@ -784,6 +785,17 @@ typedef enum WGPUCompositeAlphaMode {
     WGPUCompositeAlphaMode_Force32 = 0x7FFFFFFF
 } WGPUCompositeAlphaMode WGPU_ENUM_ATTRIBUTE;
 
+typedef enum WGPUComponentSwizzle {
+    WGPUComponentSwizzle_Undefined = 0x00000000,
+    WGPUComponentSwizzle_Zero = 0x00000001,
+    WGPUComponentSwizzle_One = 0x00000002,
+    WGPUComponentSwizzle_R = 0x00000003,
+    WGPUComponentSwizzle_G = 0x00000004,
+    WGPUComponentSwizzle_B = 0x00000005,
+    WGPUComponentSwizzle_A = 0x00000006,
+    WGPUComponentSwizzle_Force32 = 0x7FFFFFFF
+} WGPUComponentSwizzle WGPU_ENUM_ATTRIBUTE;
+
 typedef enum WGPURayTracingAccelerationGeometryType{
     WGPURayTracingAccelerationGeometryType_Triangles = 0x00000001,
     WGPURayTracingAccelerationGeometryType_AABBs     = 0x00000002,
@@ -1302,6 +1314,19 @@ typedef struct WGPUTextureViewDescriptor{
     WGPUTextureAspect aspect;
     WGPUTextureUsage usage;
 }WGPUTextureViewDescriptor;
+
+typedef struct WGPUTextureComponentSwizzle {
+    WGPUComponentSwizzle r;
+    WGPUComponentSwizzle g;
+    WGPUComponentSwizzle b;
+    WGPUComponentSwizzle a;
+} WGPUTextureComponentSwizzle WGPU_STRUCTURE_ATTRIBUTE;
+
+// Can be chained in WGPUTextureViewDescriptor
+typedef struct WGPUTextureComponentSwizzleDescriptor {
+    WGPUChainedStruct chain;
+    WGPUTextureComponentSwizzle swizzle;
+} WGPUTextureComponentSwizzleDescriptor WGPU_STRUCTURE_ATTRIBUTE;
 
 typedef struct WGPUBufferAllocatorSelector{
     WGPUChainedStruct chain;
