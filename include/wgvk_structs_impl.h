@@ -83,9 +83,6 @@
 #if defined(_WIN32)
     #define WIN32_LEAN_AND_MEAN
     #define Rectangle w__Rectangle
-    #define LoadImage w__LoadImage
-    #define DrawText w__DrawText
-    #define DrawTextEx w__DrawTextEx
     #define ShowCursor w__ShowCursor
     #define AdapterType w__AdapterType
     #include <windows.h>
@@ -1497,7 +1494,9 @@ typedef struct RenderPassCommandBeginOcclusionQuery {
 } RenderPassCommandBeginOcclusionQuery;
 
 typedef struct RenderPassCommandEndOcclusionQuery {
-    // This command takes no arguments.
+    // Empty structs are technically illegal so a placeholder is needed
+    // GCC and Clang allow empty structs but MSVC does not
+    char nothing;
 } RenderPassCommandEndOcclusionQuery;
 
 typedef struct RenderPassCommandInsertDebugMarker {
@@ -1708,12 +1707,11 @@ typedef struct WGPUString{
 static inline WGPUString WGPUStringFromView(WGPUStringView view){
     size_t length = view.length == WGPU_STRLEN ? strlen(view.data) : view.length;
     if(length == 0){
-        return (WGPUString){0};
+        return CLITERAL(WGPUString){0};
     }
-    WGPUString ret = {
-        .data = (char*)RL_CALLOC(length, 1),
-        .length = length
-    };
+    WGPUString ret;
+    ret.data = (char*)RL_CALLOC(length, 1);
+    ret.length = length;
     memcpy(ret.data, view.data, length);
     return ret;
 }
@@ -1761,8 +1759,8 @@ static bool attachmentDescriptorCompare(AttachmentDescriptor a, AttachmentDescri
 
 typedef struct RenderPassLayout{
     uint32_t colorAttachmentCount;
-    AttachmentDescriptor colorAttachments [4];
-    AttachmentDescriptor colorResolveAttachments [4];
+    AttachmentDescriptor colorAttachments [max_color_attachments];
+    AttachmentDescriptor colorResolveAttachments [max_color_attachments];
     uint32_t depthAttachmentPresent;
     AttachmentDescriptor depthAttachment;
     //uint32_t colorResolveIndex;
@@ -2074,6 +2072,8 @@ typedef struct WGPUDeviceImpl{
     WgvkAllocator builtinAllocator;
     #if USE_VMA_ALLOCATOR == 1
     VmaAllocator allocator;
+    #else
+    void* vma_allocator_placeholder;
     #endif
 
     VmaPool aligned_hostVisiblePool;
@@ -2148,6 +2148,7 @@ static inline void FenceCache_Destroy(FenceCache* ptr){
     VkFenceVector_free(&ptr->cachedFences);
 }
 typedef uint8_t SlimComponentSwizzle;
+
 #define SLIM_COMPONENT_SWIZZLE_IDENTITY ((SlimComponentSwizzle)VK_COMPONENT_SWIZZLE_IDENTITY)
 #define SLIM_COMPONENT_SWIZZLE_ZERO ((SlimComponentSwizzle)VK_COMPONENT_SWIZZLE_ZERO)
 #define SLIM_COMPONENT_SWIZZLE_ONE ((SlimComponentSwizzle)VK_COMPONENT_SWIZZLE_ONE)
@@ -2155,6 +2156,7 @@ typedef uint8_t SlimComponentSwizzle;
 #define SLIM_COMPONENT_SWIZZLE_G ((SlimComponentSwizzle)VK_COMPONENT_SWIZZLE_G)
 #define SLIM_COMPONENT_SWIZZLE_B ((SlimComponentSwizzle)VK_COMPONENT_SWIZZLE_B)
 #define SLIM_COMPONENT_SWIZZLE_A ((SlimComponentSwizzle)VK_COMPONENT_SWIZZLE_A)
+
 
 typedef struct SlimComponentMapping{
     SlimComponentSwizzle r;
@@ -2226,7 +2228,7 @@ static inline size_t Hash_FormatAspectAndSR(SlimViewCreateInfo obj){
     return hash;
 }
 
-DEFINE_GENERIC_HASH_MAP(static inline, Texture_ViewCache, SlimViewCreateInfo, WGPUTextureView, Hash_FormatAspectAndSR, Compare_FormatAspectAndSR, (SlimViewCreateInfo){VK_FORMAT_UNDEFINED});
+DEFINE_GENERIC_HASH_MAP(static inline, Texture_ViewCache, SlimViewCreateInfo, WGPUTextureView, Hash_FormatAspectAndSR, Compare_FormatAspectAndSR, CLITERAL(SlimViewCreateInfo){VK_FORMAT_UNDEFINED});
 typedef struct WGPUTextureImpl{
     VkImage image;
     VkFormat format;
@@ -2373,7 +2375,7 @@ static inline size_t cmpDynamicState(DefaultDynamicState a, DefaultDynamicState 
     a.blendConstants[0] == b.blendConstants[0] &&
     a.stencilReference == b.stencilReference;
 }
-DEFINE_GENERIC_HASH_MAP(static inline, DynamicStateCommandBufferMap, DefaultDynamicState, VkCommandBuffer, hashDynamicState, cmpDynamicState, (DefaultDynamicState){0})
+DEFINE_GENERIC_HASH_MAP(static inline, DynamicStateCommandBufferMap, DefaultDynamicState, VkCommandBuffer, hashDynamicState, cmpDynamicState, CLITERAL(DefaultDynamicState){0})
 
 typedef struct WGPURenderBundleImpl{
     RenderPassCommandGenericVector bufferedCommands;
@@ -2510,6 +2512,7 @@ typedef struct WGPUQuerySetImpl{
 }WGPUQuerySetImpl;
 
 
+char* sw_sprintf(const char* format, ...);
 
 
 #if WGPU_VALIDATION_ENABLED
@@ -2526,7 +2529,7 @@ typedef struct WGPUQuerySetImpl{
                 (device_ptr)->uncapturedErrorCallbackInfo.callback( \
                     (const WGPUDevice*)(device_ptr), \
                     (error_type), \
-                    (WGPUStringView){resolved_message, message_len}, \
+                    CLITERAL(WGPUStringView){resolved_message, message_len}, \
                     (device_ptr)->uncapturedErrorCallbackInfo.userdata1, \
                     (device_ptr)->uncapturedErrorCallbackInfo.userdata2 \
                 ); \
@@ -2687,7 +2690,7 @@ typedef struct WGPUQuerySetImpl{
     } while (0)
 
 
-#define WGPU_VALIDATION_ERROR_MESSAGE(message ...) \
+#define WGPU_VALIDATION_ERROR_MESSAGE(message) \
     do {  \
         char vmessageBuffer[8192] = {0}; \
         snprintf(vmessageBuffer, 8192, message); \

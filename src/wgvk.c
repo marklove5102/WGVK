@@ -306,6 +306,178 @@ WGPUSurface wgpuInstanceCreateSurface(WGPUInstance instance, const WGPUSurfaceDe
     EXIT();
 }
 
+char* sw_sprintf(const char* format, ...) {
+    if (!format) return NULL;
+    
+    va_list args1, args2;
+    va_start(args1, format);
+    va_copy(args2, args1);
+    
+    // Calculate required buffer size by processing format string
+    size_t total_len = 0;
+    const char* p = format;
+    
+    while (*p) {
+        if (*p == '%') {
+            p++;
+            if (*p == '%') {
+                total_len += 1; // Literal %
+                p++;
+                continue;
+            }
+            
+            // Skip flags, width, precision
+            while (*p && strchr("-+ #0", *p)) p++;
+            while (*p && *p >= '0' && *p <= '9') p++;
+            if (*p == '.') {
+                p++;
+                while (*p && *p >= '0' && *p <= '9') p++;
+            }
+            
+            // Check for our custom specifier
+            if (*p == 's' && p[1] == 'w') {
+                WGPUStringView sv = va_arg(args1, WGPUStringView);
+                if (sv.data) {
+                    if (sv.length == WGPU_STRLEN) {
+                        total_len += strlen(sv.data);
+                    } else {
+                        total_len += sv.length;
+                    }
+                }
+                p += 2; // Skip "sw"
+            } else if (*p) {
+                // Standard specifier - estimate conservatively
+                switch (*p) {
+                    case 'd': case 'i': case 'o': case 'x': case 'X': case 'u':
+                        va_arg(args1, int);
+                        total_len += 32; // Conservative for 64-bit ints
+                        break;
+                    case 'f': case 'F': case 'e': case 'E': case 'g': case 'G':
+                        va_arg(args1, double);
+                        total_len += 64; // Conservative for doubles
+                        break;
+                    case 's':
+                        {
+                            const char* s = va_arg(args1, const char*);
+                            total_len += s ? strlen(s) : 6; // "(null)"
+                        }
+                        break;
+                    case 'c':
+                        va_arg(args1, int);
+                        total_len += 1;
+                        break;
+                    case 'p':
+                        va_arg(args1, void*);
+                        total_len += 18; // "0x" + 16 hex digits
+                        break;
+                    default:
+                        total_len += 1; // Unknown, just add something
+                        break;
+                }
+                p++;
+            }
+        } else {
+            total_len += 1; // Literal character
+            p++;
+        }
+    }
+    
+    va_end(args1);
+    
+    // Allocate buffer with some padding for safety
+    char* buffer = RL_MALLOC(total_len + 16);
+    if (!buffer) {
+        va_end(args2);
+        return NULL;
+    }
+    
+    // Build the actual string
+    char* out = buffer;
+    p = format;
+    
+    while (*p) {
+        if (*p == '%') {
+            p++;
+            if (*p == '%') {
+                *out++ = '%';
+                p++;
+                continue;
+            }
+            
+            // Parse format specifier
+            const char* spec_start = p - 1;
+            
+            // Skip flags, width, precision
+            while (*p && strchr("-+ #0", *p)) p++;
+            while (*p && *p >= '0' && *p <= '9') p++;
+            if (*p == '.') {
+                p++;
+                while (*p && *p >= '0' && *p <= '9') p++;
+            }
+            
+            if (*p == 's' && p[1] == 'w') {
+                // Handle %sw specifier
+                WGPUStringView sv = va_arg(args2, WGPUStringView);
+                if (sv.data) {
+                    if (sv.length == WGPU_STRLEN) {
+                        strcpy(out, sv.data);
+                        out += strlen(sv.data);
+                    } else {
+                        memcpy(out, sv.data, sv.length);
+                        out += sv.length;
+                    }
+                }
+                p += 2;
+            } else if (*p) {
+                // Standard specifier - create temporary format and use sprintf
+                size_t spec_len = p - spec_start + 1;
+                char temp_format[32];
+                if (spec_len < sizeof(temp_format)) {
+                    memcpy(temp_format, spec_start, spec_len);
+                    temp_format[spec_len] = '\0';
+                    
+                    char temp_buf[256];
+                    int written = 0;
+                    
+                    switch (*p) {
+                        case 'd': case 'i': case 'o': case 'x': case 'X': case 'u':
+                            written = sprintf(temp_buf, temp_format, va_arg(args2, int));
+                            break;
+                        case 'f': case 'F': case 'e': case 'E': case 'g': case 'G':
+                            written = sprintf(temp_buf, temp_format, va_arg(args2, double));
+                            break;
+                        case 's':
+                            written = sprintf(temp_buf, temp_format, va_arg(args2, const char*));
+                            break;
+                        case 'c':
+                            written = sprintf(temp_buf, temp_format, va_arg(args2, int));
+                            break;
+                        case 'p':
+                            written = sprintf(temp_buf, temp_format, va_arg(args2, void*));
+                            break;
+                    }
+                    
+                    if (written > 0) {
+                        memcpy(out, temp_buf, written);
+                        out += written;
+                    }
+                }
+                p++;
+            }
+        } else {
+            *out++ = *p++;
+        }
+    }
+    
+    *out = '\0';
+    va_end(args2);
+    
+    // Resize buffer to exact size needed
+    size_t actual_len = out - buffer;
+    char* final_buffer = realloc(buffer, actual_len + 1);
+    return final_buffer ? final_buffer : buffer;
+}
+
 
 WGPUStatus wgpuDeviceGetAdapterInfo(WGPUDevice device, WGPUAdapterInfo* adapterInfo) WGPU_FUNCTION_ATTRIBUTE {
     ENTRY();
@@ -325,7 +497,7 @@ WGPUStatus wgpuDeviceGetAdapterInfo(WGPUDevice device, WGPUAdapterInfo* adapterI
 
     vkGetPhysicalDeviceProperties2(device->adapter->physicalDevice, &deviceProperties2);
 
-    strncpy(device->adapter->cachedDeviceName, deviceProperties2.properties.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE - 1);
+    strncpy(device->adapter->cachedDeviceName, deviceProperties2.properties.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
     device->adapter->cachedDeviceName[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE - 1] = '\0'; // Explicitly null-terminate
 
     // Set the WGPUStringView to point to the stable, cached string.
@@ -1339,7 +1511,7 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
         VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME,       // "VK_KHR_shader_float_controls" - required by spirv_1_4
         #endif
     };
-    const uint32_t deviceExtensionsToLookForCount = sizeof(deviceExtensionsToLookFor) / sizeof(const char*);
+    #define deviceExtensionsToLookForCount (sizeof(deviceExtensionsToLookFor) / sizeof(const char*))
     
     int depthClipControl_Found = 0;
     int depthClipEnable_Found = 0;
@@ -1727,7 +1899,7 @@ void wgpuBufferMap(WGPUBuffer buffer, WGPUMapMode mapmode, size_t offset, size_t
         #if USE_VMA_ALLOCATOR == 1
         case AllocationTypeVMA: {
             vmaMapMemory(buffer->device->allocator, buffer->vmaAllocation, data);
-            buffer->mappedRange = data
+            buffer->mappedRange = data;
         }break;
         #endif
         case AllocationTypeJustMemory: {
@@ -1963,12 +2135,23 @@ WGPUTexture wgpuDeviceCreateTexture(WGPUDevice device, const WGPUTextureDescript
     ENTRY();
     VkDeviceMemory imageMemory zeroinit;
     // Adjust usage flags based on format (e.g., depth formats might need different usages)
+    if(descriptor->viewFormatCount == 0){
+        char* message = sw_sprintf("Texture descriptor [%s] contains zero view formats", descriptor->label);
+        WGPUStringView msg = {
+            .data = message,
+            .length = strlen(message)
+        };
+        DeviceCallback(device, WGPUErrorType_Validation, msg);
+        RL_FREE(message);
+
+    }
     WGPUTexture ret = RL_CALLOC(1, sizeof(WGPUTextureImpl));
     ret->usage = toVulkanTextureUsage(descriptor->usage, descriptor->format);
     ret->dimension = toVulkanTextureDimension(descriptor->dimension);
     VkImageCreateInfo imageInfo = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .pNext = NULL,
+        .flags = 0,
         .imageType = VK_IMAGE_TYPE_2D,
         .extent = {
             .width = descriptor->size.width,
@@ -1984,6 +2167,10 @@ WGPUTexture wgpuDeviceCreateTexture(WGPUDevice device, const WGPUTextureDescript
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .samples = toVulkanSampleCount(descriptor->sampleCount),
     };
+
+    if(descriptor->viewFormats == NULL || descriptor->viewFormatCount > 1 || descriptor->viewFormats[0] != descriptor->format){
+        imageInfo.flags = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
+    }
     
     VkImage image zeroinit;
     if (device->functions.vkCreateImage(device->device, &imageInfo, NULL, &image) != VK_SUCCESS)
@@ -5146,7 +5333,6 @@ void wgpuCommandEncoderCopyBufferToBuffer  (WGPUCommandEncoder commandEncoder, W
 void wgpuCommandEncoderCopyBufferToTexture (WGPUCommandEncoder commandEncoder, WGPUTexelCopyBufferInfo const * source, WGPUTexelCopyTextureInfo const * destination, WGPUExtent3D const * copySize){
     ENTRY();
     
-    VkImageCopy copy;
     VkBufferImageCopy region zeroinit;
     ++commandEncoder->encodedCommandCount;
     region.bufferOffset = 0;
