@@ -3112,6 +3112,9 @@ WGPUTexture wgpuDeviceCreateTexture(WGPUDevice device, const WGPUTextureDescript
     if(descriptor->viewFormats == NULL || descriptor->viewFormatCount > 1 || descriptor->viewFormats[0] != descriptor->format){
         imageInfo.flags = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
     }
+    if(descriptor->dimension == WGPUTextureDimension_2D && descriptor->size.depthOrArrayLayers >= 6){
+        imageInfo.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+    }
     
     VkImage image zeroinit;
     if (device->functions.vkCreateImage(device->device, &imageInfo, NULL, &image) != VK_SUCCESS)

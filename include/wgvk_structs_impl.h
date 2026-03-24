@@ -3234,6 +3234,12 @@ static inline VkImageViewType toVulkanTextureViewDimension(WGPUTextureViewDimens
         case WGPUTextureViewDimension_2DArray:{
             return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
         }
+        case WGPUTextureViewDimension_Cube:{
+            return VK_IMAGE_VIEW_TYPE_CUBE;
+        }
+        case WGPUTextureViewDimension_CubeArray:{
+            return VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
+        }
 
     }
 }
