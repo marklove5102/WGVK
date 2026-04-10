@@ -838,8 +838,8 @@ WGPUStatus FIFCache_init(FIFCache* fifCache, WGPUDevice device, uint32_t queueFa
         device->functions.vkAllocateCommandBuffers(device->device, &cbai, ftb);
         fifCache->frameCaches[i].finalTransitionFence = wgpuDeviceCreateFence(device);
         VkSemaphoreVector* semvec = &fifCache->frameCaches[i].syncState.semaphores;
-        VkSemaphoreVector_reserve(semvec, 100);
-        semvec->size = 100;
+        VkSemaphoreVector_reserve(semvec, 8);
+        semvec->size = 8;
         for(uint32_t j = 0;j < semvec->size;j++){
             if(device->functions.vkCreateSemaphore(device->device, &sci, NULL, semvec->data + j) != VK_SUCCESS){
                 return WGPUStatus_Error;
@@ -856,6 +856,28 @@ void SyncState_destroy(WGPUDevice device, SyncState* syncState){
         device->functions.vkDestroySemaphore(device->device, syncState->semaphores.data[s], NULL);
     }
     VkSemaphoreVector_free(&syncState->semaphores);
+}
+
+// Ensure semaphores vector has a valid entry at neededIndex.
+// Grows with doubling and creates new VkSemaphores for the new slots.
+static WGPUStatus SyncState_ensureCapacity(WGPUDevice device, SyncState* syncState, uint32_t neededIndex){
+    VkSemaphoreVector* semvec = &syncState->semaphores;
+    if(neededIndex < semvec->size) return WGPUStatus_Success;
+
+    uint32_t oldSize = semvec->size;
+    uint32_t newSize = oldSize * 2;
+    if(newSize <= neededIndex) newSize = neededIndex + 1;
+
+    VkSemaphoreVector_reserve(semvec, newSize);
+    VkSemaphoreCreateInfo sci = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+    for(uint32_t j = oldSize; j < newSize; j++){
+        if(device->functions.vkCreateSemaphore(device->device, &sci, NULL, semvec->data + j) != VK_SUCCESS){
+            semvec->size = j;
+            return WGPUStatus_Error;
+        }
+    }
+    semvec->size = newSize;
+    return WGPUStatus_Success;
 }
 
 void FIFCache_destroy(FIFCache* fcache){
@@ -1183,7 +1205,6 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
     //return VK_FALSE;
     if(messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT){
         wgpuTraceLog(WGPU_LOG_ERROR, pCallbackData->pMessage);
-        rg_trap();
     }
     else if(messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT){
         wgpuTraceLog(WGPU_LOG_WARNING, pCallbackData->pMessage);
@@ -3117,25 +3138,31 @@ WGPUTexture wgpuDeviceCreateTexture(WGPUDevice device, const WGPUTextureDescript
     }
     
     VkImage image zeroinit;
-    if (device->functions.vkCreateImage(device->device, &imageInfo, NULL, &image) != VK_SUCCESS)
-        TRACELOG(WGPU_LOG_FATAL, "Failed to create image!");
-    
+    if (device->functions.vkCreateImage(device->device, &imageInfo, NULL, &image) != VK_SUCCESS){
+        TRACELOG(WGPU_LOG_ERROR, "Failed to create image!");
+        DeviceCallback(device, WGPUErrorType_Validation, STRVIEW("Failed to create image"));
+        RL_FREE(ret);
+        return NULL;
+    }
+
     VkMemoryRequirements memReq;
     device->functions.vkGetImageMemoryRequirements(device->device, image, &memReq);
-    
+
     VkMemoryAllocateInfo allocInfo zeroinit;
     allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocInfo.allocationSize = memReq.size;
     allocInfo.memoryTypeIndex = findMemoryType(
         device->adapter,
-        memReq.memoryTypeBits, 
+        memReq.memoryTypeBits,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
-    //wgvkAllocation allocation = {0};
-    //wgvkAllocator_alloc(&device->builtinAllocator, &memReq, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &allocation);
-    
+
     if (device->functions.vkAllocateMemory(device->device, &allocInfo, NULL, &imageMemory) != VK_SUCCESS){
-        TRACELOG(WGPU_LOG_FATAL, "Failed to allocate image memory!");
+        TRACELOG(WGPU_LOG_ERROR, "Failed to allocate image memory!");
+        DeviceCallback(device, WGPUErrorType_OutOfMemory, STRVIEW("Failed to allocate image memory"));
+        device->functions.vkDestroyImage(device->device, image, NULL);
+        RL_FREE(ret);
+        return NULL;
     }
     device->functions.vkBindImageMemory(device->device, image, imageMemory, 0);
 
@@ -3632,15 +3659,18 @@ WGPUShaderModule wgpuDeviceCreateShaderModule(WGPUDevice device, const WGPUShade
 
 WGPUPipelineLayout wgpuDeviceCreatePipelineLayout(WGPUDevice device, const WGPUPipelineLayoutDescriptor* pldesc){
     ENTRY();
+    if(pldesc->bindGroupLayoutCount > device->limits.maxBindGroups){
+        DeviceCallback(device, WGPUErrorType_Validation, STRVIEW("bindGroupLayoutCount exceeds maxBindGroups"));
+        return NULL;
+    }
     WGPUPipelineLayout ret = RL_CALLOC(1, sizeof(WGPUPipelineLayoutImpl));
     ret->refCount = 1;
-    wgvk_assert(ret->bindGroupLayoutCount <= 8, "Only supports up to 8 BindGroupLayouts");
     ret->device = device;
     ret->bindGroupLayoutCount = pldesc->bindGroupLayoutCount;
     ret->bindGroupLayouts = (WGPUBindGroupLayout*)RL_CALLOC(pldesc->bindGroupLayoutCount, sizeof(void*));
     if(pldesc->bindGroupLayoutCount > 0)
         memcpy((void*)ret->bindGroupLayouts, (void*)pldesc->bindGroupLayouts, pldesc->bindGroupLayoutCount * sizeof(void*));
-    VkDescriptorSetLayout dslayouts[8] = {0};
+    VkDescriptorSetLayout* dslayouts = (VkDescriptorSetLayout*)RL_CALLOC(pldesc->bindGroupLayoutCount, sizeof(VkDescriptorSetLayout));
     for(uint32_t i = 0;i < ret->bindGroupLayoutCount;i++){
         wgpuBindGroupLayoutAddRef(ret->bindGroupLayouts[i]);
         dslayouts[i] = ret->bindGroupLayouts[i]->layout;
@@ -3650,6 +3680,7 @@ WGPUPipelineLayout wgpuDeviceCreatePipelineLayout(WGPUDevice device, const WGPUP
     lci.pSetLayouts = dslayouts;
     lci.setLayoutCount = ret->bindGroupLayoutCount;
     VkResult res = device->functions.vkCreatePipelineLayout(device->device, &lci, NULL, &ret->layout);
+    RL_FREE(dslayouts);
     if(res != VK_SUCCESS){
         wgpuPipelineLayoutRelease(ret);
         ret = NULL;
@@ -5193,6 +5224,11 @@ static const char* il_string(VkImageLayout layout){
 void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuffer* buffers){
     ENTRY();
 
+    // TODO: properly flush presubmitCache even when commandCount == 0
+    if(commandCount == 0 && queue->presubmitCache->encodedCommandCount == 0){
+        return;
+    }
+
     WGPUCommandBufferVector submittableWGPU;
     WGPUCommandEncoder pscache = queue->presubmitCache;
     const uint32_t cacheBufferNonEmpty = ((pscache->encodedCommandCount > 0) ? 1 : 0);
@@ -5261,6 +5297,7 @@ void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuff
             syncState->acquireImageSemaphoreSignalled = false;
         }
         const uint32_t submits = syncState->submits;
+        SyncState_ensureCapacity(queue->device, syncState, submits + 1);
         if(submits > 0){
             VkSemaphoreVector_push_back(&waitSemaphores, syncState->semaphores.data[submits]);
         }
@@ -8906,8 +8943,9 @@ WGPUQuerySet wgpuDeviceCreateQuerySet(WGPUDevice device, const WGPUQuerySetDescr
         RL_FREE(ret);
         return NULL;
     }
+    ret->refCount = 1;
     EXIT();
-    return ret; 
+    return ret;
 }
 
 typedef struct CreateRenderPipelineAsyncState{
@@ -9288,12 +9326,15 @@ void wgpuQuerySetSetLabel(WGPUQuerySet querySet, WGPUStringView label) {
 }
 void wgpuQuerySetAddRef(WGPUQuerySet querySet) {
     ENTRY();
-
+    ++querySet->refCount;
     EXIT();
 }
 void wgpuQuerySetRelease(WGPUQuerySet querySet) {
     ENTRY();
-
+    if(--querySet->refCount == 0){
+        querySet->device->functions.vkDestroyQueryPool(querySet->device->device, querySet->queryPool, NULL);
+        RL_FREE(querySet);
+    }
     EXIT();
 }
 
@@ -9937,6 +9978,7 @@ RGAPI VkResult wgvkAllocator_init(WgvkAllocator* allocator, VkPhysicalDevice phy
     allocator->device = device;
     allocator->physicalDevice = physicalDevice;
     allocator->pFunctions = dtable;
+    allocator->mutex = wgvk_mutex_create(wgvk_locktype_kernel);
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &allocator->memoryProperties);
     return VK_SUCCESS;
 }
@@ -9947,10 +9989,12 @@ RGAPI void wgvkAllocator_destroy(WgvkAllocator* allocator) {
         wgvkDeviceMemoryPool_destroy(&allocator->pools[i]);
     }
     free(allocator->pools);
+    if(allocator->mutex) wgvk_mutex_destroy(allocator->mutex);
     memset(allocator, 0, sizeof(WgvkAllocator));
 }
 
 RGAPI bool wgvkAllocator_alloc(WgvkAllocator* allocator, const VkMemoryRequirements* requirements, VkMemoryPropertyFlags propertyFlags, wgvkAllocation* out_allocation) {
+    wgvk_mutex_lock(allocator->mutex);
     // Normalized alignment used everywhere below.
     size_t norm_alignment = requirements->alignment;
     {
@@ -9982,6 +10026,7 @@ RGAPI bool wgvkAllocator_alloc(WgvkAllocator* allocator, const VkMemoryRequireme
 
         if (found_pool) {
             if (wgvkDeviceMemoryPool_alloc(found_pool, requirements->size, norm_alignment, out_allocation)) {
+                wgvk_mutex_unlock(allocator->mutex);
                 return true;
             }
         }
@@ -9994,7 +10039,7 @@ RGAPI bool wgvkAllocator_alloc(WgvkAllocator* allocator, const VkMemoryRequireme
         if (allocator->pool_count == allocator->pool_capacity) {
             uint32_t new_capacity = allocator->pool_capacity == 0 ? 4 : allocator->pool_capacity * 2;
             WgvkDeviceMemoryPool* new_pools = RL_REALLOC(allocator->pools, new_capacity * sizeof(WgvkDeviceMemoryPool));
-            if (!new_pools) return false;
+            if (!new_pools) { wgvk_mutex_unlock(allocator->mutex); return false; }
             allocator->pools = new_pools;
             allocator->pool_capacity = new_capacity;
         }
@@ -10009,12 +10054,14 @@ RGAPI bool wgvkAllocator_alloc(WgvkAllocator* allocator, const VkMemoryRequireme
         allocator->pool_count++;
 
         if (wgvkDeviceMemoryPool_alloc(new_pool, requirements->size, norm_alignment, out_allocation)) {
+            wgvk_mutex_unlock(allocator->mutex);
             return true;
         } else {
             allocator->pool_count--;
         }
     }
 
+    wgvk_mutex_unlock(allocator->mutex);
     return false;
 }
 

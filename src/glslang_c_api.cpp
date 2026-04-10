@@ -132,7 +132,11 @@ WGPUShaderModule wgpuDeviceCreateShaderModuleGLSL(WGPUDevice device, const WGPUS
     auto spirvTarget = device->capabilities.dynamicRendering
         ? glslang::EShTargetSpv_1_6 : glslang::EShTargetSpv_1_3;
     std::vector<uint32_t> spirvSource = glsl_to_spirv_single(device, source->code, wgpuShaderStageToGlslang(source->stage), vulkanTarget, spirvTarget);
-    
+
+    if(spirvSource.empty()){
+        return nullptr;
+    }
+
     WGPUShaderModule shadermodule = (WGPUShaderModuleImpl*)RL_CALLOC(1, sizeof(WGPUShaderModuleImpl));
     if (!shadermodule) return nullptr;
 

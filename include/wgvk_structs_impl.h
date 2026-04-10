@@ -1418,6 +1418,7 @@ struct WgvkAllocator {
     struct VolkDeviceTable* pFunctions;
     VkPhysicalDevice physicalDevice;
     VkPhysicalDeviceMemoryProperties memoryProperties;
+    wgvk_mutex_t* mutex;
 };
 
 typedef struct ImageUsageRecord{
