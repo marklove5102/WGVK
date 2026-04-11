@@ -6597,15 +6597,19 @@ WGPURenderPipeline wgpuDeviceCreateRenderPipeline(WGPUDevice device, const WGPUR
     #if VULKAN_USE_DYNAMIC_RENDERING == 1
     VkRenderPass rprp = NULL;
     VkFormat cAttachmentFormats[MAX_COLOR_ATTACHMENTS];
-    for(uint32_t i = 0;i < descriptor->fragment->targetCount;i++){
-        cAttachmentFormats[i] = toVulkanPixelFormat(descriptor->fragment->targets[i].format);
+    uint32_t colorAttachmentCount = 0;
+    if(descriptor->fragment){
+        colorAttachmentCount = descriptor->fragment->targetCount;
+        for(uint32_t i = 0;i < colorAttachmentCount;i++){
+            cAttachmentFormats[i] = toVulkanPixelFormat(descriptor->fragment->targets[i].format);
+        }
     }
 
-    
+
     VkPipelineRenderingCreateInfo renderingCreateInfo = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
         .pNext = NULL,
-        .colorAttachmentCount = descriptor->fragment->targetCount,
+        .colorAttachmentCount = colorAttachmentCount,
         .pColorAttachmentFormats = cAttachmentFormats,
         .depthAttachmentFormat = descriptor->depthStencil ? toVulkanPixelFormat(descriptor->depthStencil->format) : VK_FORMAT_UNDEFINED,
         .stencilAttachmentFormat = stencilEnable ? toVulkanPixelFormat(descriptor->depthStencil->format) : VK_FORMAT_UNDEFINED
@@ -6613,16 +6617,18 @@ WGPURenderPipeline wgpuDeviceCreateRenderPipeline(WGPUDevice device, const WGPUR
     VkPipelineRenderingCreateInfo* pRenderingCreateInfo = &renderingCreateInfo;
     #else
     RenderPassLayout renderPassLayout = {0};
-    for(uint32_t i = 0;i < descriptor->fragment->targetCount;i++){
-        const WGPUColorTargetState* ctarget = descriptor->fragment->targets + i;
-        renderPassLayout.colorAttachments[i] = (AttachmentDescriptor){
-            .sampleCount = multisampling.rasterizationSamples,
-            .format = toVulkanPixelFormat(ctarget->format),
-            .loadop = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-            .storeop = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-        };
+    if(descriptor->fragment){
+        for(uint32_t i = 0;i < descriptor->fragment->targetCount;i++){
+            const WGPUColorTargetState* ctarget = descriptor->fragment->targets + i;
+            renderPassLayout.colorAttachments[i] = (AttachmentDescriptor){
+                .sampleCount = multisampling.rasterizationSamples,
+                .format = toVulkanPixelFormat(ctarget->format),
+                .loadop = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                .storeop = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+            };
+        }
+        renderPassLayout.colorAttachmentCount = descriptor->fragment->targetCount;
     }
-    renderPassLayout.colorAttachmentCount = descriptor->fragment->targetCount;
     if(descriptor->depthStencil){
         renderPassLayout.depthAttachmentPresent = 1;
         renderPassLayout.depthAttachment = (AttachmentDescriptor){
